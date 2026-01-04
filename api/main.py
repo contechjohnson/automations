@@ -21,6 +21,9 @@ from rq.registry import StartedJobRegistry, FinishedJobRegistry, FailedJobRegist
 
 import asyncio
 
+# Import registry router
+from api.registry import router as registry_router
+
 # Redis connection
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 redis_conn = Redis.from_url(REDIS_URL)
@@ -50,6 +53,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include registry router
+app.include_router(registry_router)
 
 
 # =============================================================================
@@ -314,3 +320,40 @@ def cancel_job(job_id: str):
         return {"status": "cancelled", "job_id": job_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# Run Automation from Registry
+# =============================================================================
+
+class RunAutomation(BaseModel):
+    """Run an automation by slug."""
+    slug: str
+    override_config: Optional[dict] = None
+
+
+@app.post("/run")
+def run_automation_endpoint(request: RunAutomation):
+    """
+    Run an automation from the registry.
+    
+    This is the main way to execute automations - just provide the slug.
+    Config is loaded from the registry, or you can override it.
+    """
+    from workers.runner import run_automation
+    
+    rq_job = queue.enqueue(
+        run_automation,
+        kwargs={
+            "slug": request.slug,
+            "override_config": request.override_config
+        },
+        job_timeout=900,
+        result_ttl=86400
+    )
+    
+    return {
+        "job_id": rq_job.id,
+        "status": rq_job.get_status(),
+        "automation": request.slug
+    }
