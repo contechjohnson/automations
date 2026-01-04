@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # API - receives job requests
+  api:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./workers:/app/workers
+      - ./api:/app/api
+    restart: unless-stopped
+
+  # Worker - processes jobs from queue
+  worker:
+    build: .
+    command: rq worker --with-scheduler --url ${REDIS_URL}
+    env_file:
+      - .env
+    volumes:
+      - ./workers:/app/workers
+    restart: unless-stopped
+    # Scale workers: docker-compose up -d --scale worker=3
+
+  # Dashboard - web UI to see all jobs
+  dashboard:
+    build: .
+    command: rq-dashboard --redis-url ${REDIS_URL} --bind 0.0.0.0
+    ports:
+      - "9181:9181"
+    env_file:
+      - .env
+    restart: unless-stopped
