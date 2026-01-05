@@ -35,6 +35,7 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 | `creating-directives` | "new directive", "define automation", "standardize" |
 | `building-automations` | "build automation", "implement directive", "create worker" |
 | `using-rq-workers` | "queue job", "background", "RQ", "long running" |
+| `managing-mental-models` | "mental model", "priorities", "to-do", "columnline", "prologis", "life" |
 
 
 ---

@@ -327,7 +327,9 @@ status = poll_research(result["response_id"])
 
 ## Available Models
 
-See [reference/available-models.md](reference/available-models.md) for full list.
+See the full model list at:
+- **Path:** `.claude/skills/building-automations/reference/available-models.md`
+- **GitHub:** [available-models.md](https://github.com/contechjohnson/automations/blob/main/.claude/skills/building-automations/reference/available-models.md)
 
 | Model | Use Case | Background? |
 |-------|----------|-------------|

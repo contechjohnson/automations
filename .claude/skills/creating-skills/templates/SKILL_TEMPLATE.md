@@ -55,6 +55,37 @@ python3 scripts/main.py --input data.csv
 
 ---
 
+## Resources
+
+**Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
+
+### Files Referenced by This Skill
+
+| Resource | Path |
+|----------|------|
+| {Script Name} | `.claude/skills/{skill-name}/scripts/{script}.py` |
+| {Template Name} | `.claude/skills/{skill-name}/templates/{template}.md` |
+
+### API Endpoints (if applicable)
+
+| Endpoint | URL |
+|----------|-----|
+| Production API | `https://api.columnline.dev` |
+
+### Environment Variables Required (if applicable)
+
+| Variable | Purpose |
+|----------|---------|
+| `{VARIABLE_NAME}` | {What it's used for} - from `.env` locally, paste directly in web |
+
+### Related Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `{related-skill}` | {When to use it} |
+
+---
+
 ## Self-Annealing
 
 **MANDATORY:** After any failure or unexpected behavior:
