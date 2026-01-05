@@ -53,19 +53,27 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 
 ### API URLs
 
-**Use ngrok URL for AI models and external integrations** - it's HTTPS and available everywhere.
+| URL | When to Use | Header Required |
+|-----|-------------|-----------------|
+| `https://lazy-bella-unevolutional.ngrok-free.dev` | **AI models, external integrations, webhooks** | `ngrok-skip-browser-warning: true` |
+| `http://64.225.120.95:8000` | Local testing (faster) | None |
 
-**Use direct IP for local testing** - faster, no SSL overhead.
+**Why ngrok matters:** External AI tools (ChatGPT, Claude API, webhooks) can only reach HTTPS endpoints. The ngrok URL is the only way to test integrations with external services before deploying them. Always verify the ngrok endpoint works before relying on it for production integrations.
 
 ```bash
-# ngrok (preferred for AI models) - requires header
+# ngrok (for AI models/external integrations) - requires header
 NGROK_URL="https://lazy-bella-unevolutional.ngrok-free.dev"
 curl -H "ngrok-skip-browser-warning: true" "$NGROK_URL/health"
 
-# Direct IP (for local testing)
+# Direct IP (for local/internal testing)
 DIRECT_URL="http://64.225.120.95:8000"
 curl "$DIRECT_URL/health"
 ```
+
+**Troubleshooting ngrok SSL errors:** If you get TLS/SSL errors locally (e.g., `record layer failure`, `packet length too long`), your network may be intercepting HTTPS traffic (corporate firewall, ISP inspection, VPN). Try:
+1. Test from a different network
+2. Test from the droplet: `ssh root@64.225.120.95 "curl -H 'ngrok-skip-browser-warning: true' https://lazy-bella-unevolutional.ngrok-free.dev/health"`
+3. Use the direct IP for local testing (http works fine)
 
 ---
 
