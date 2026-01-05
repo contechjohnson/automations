@@ -100,6 +100,7 @@
 | AI abstraction layer | 2025-01-04 | prompt(), agent_prompt() with logging |
 | Automation registry | 2025-01-04 | Register/track automations in DB |
 | Entity research worker | 2025-01-04 | Deep research via o4-mini |
+| Claude skills framework | 2025-01-05 | creating-directives, building-automations, querying-automations, planning-roadmap |
 
 ---
 
@@ -124,3 +125,5 @@
 | 2025-01-04 | API-first architecture | Enables web access, testing, observability |
 | 2025-01-04 | Single .env symlinked from Columnline | Avoid key duplication, single source |
 | 2025-01-04 | Supabase for all logging | Already have it, good JSONB support |
+| 2025-01-05 | Skills over slash commands | Natural language triggers, no memorization |
+| 2025-01-05 | Directives before code | Define contracts first, then implement |
