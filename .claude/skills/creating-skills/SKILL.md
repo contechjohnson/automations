@@ -234,3 +234,25 @@ Run `/context` to see token usage per skill. Skills over 2000 tokens should be r
 2. Move edge case handling to `reference/troubleshooting.md`
 3. Keep SKILL.md focused on core workflow
 4. Link to reference files: "For examples, see [examples.md](reference/examples.md)"
+
+---
+
+## Resources
+
+**Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
+
+**API Endpoints:**
+| Endpoint | URL |
+|----------|-----|
+| Production API | `https://api.columnline.dev` |
+| Health Check | `https://api.columnline.dev/health` |
+| Test Prompt | `POST https://api.columnline.dev/test/prompt` |
+| Logs | `https://api.columnline.dev/logs` |
+
+**Infrastructure:**
+| Resource | Location |
+|----------|----------|
+| Droplet IP | `64.225.120.95` |
+| RQ Dashboard | `http://64.225.120.95:9181` |
+
+**Credentials:** Add `CREDENTIALS.md` to your Claude project for API keys. Cannot be stored in repo due to GitHub secret scanning.
