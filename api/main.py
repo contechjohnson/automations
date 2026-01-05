@@ -81,6 +81,13 @@ class JobResponse(BaseModel):
     progress: Optional[dict] = None
 
 
+class PromptTest(BaseModel):
+    """Test a prompt with variables."""
+    prompt_name: str
+    variables: dict = {}
+    model: str = "gpt-4.1"
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -95,29 +102,71 @@ def root():
     }
 
 
+@app.get("/health")
+def health():
+    """Health check endpoint."""
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.post("/test/prompt")
+def test_prompt(request: PromptTest):
+    """
+    Test a prompt synchronously (for quick models like gpt-4.1).
+    For deep-research models, use /jobs endpoint instead.
+    """
+    from workers.ai import prompt
+    
+    try:
+        result = prompt(
+            name=request.prompt_name,
+            variables=request.variables,
+            model=request.model,
+        )
+        return {
+            "status": "success",
+            "prompt_name": result["prompt_name"],
+            "model": result["model"],
+            "elapsed_seconds": result["elapsed_seconds"],
+            "output": result["output"],
+            "input_length": len(result["input"]),
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prompts")
+def list_prompts():
+    """List available prompts."""
+    from pathlib import Path
+    prompts_dir = Path(__file__).parent.parent / "prompts"
+    
+    if not prompts_dir.exists():
+        return {"prompts": [], "error": "Prompts directory not found"}
+    
+    prompts = []
+    for f in prompts_dir.glob("*.md"):
+        prompts.append({
+            "name": f.stem,
+            "path": str(f),
+            "size_bytes": f.stat().st_size,
+        })
+    
+    return {"prompts": prompts, "count": len(prompts)}
+
+
 @app.get("/workers")
 def list_workers():
     """List all available workers."""
-    # Dynamically discover workers
     workers = []
     
-    # Import worker modules
     try:
         from workers.research import entity_research
         workers.append({
             "name": "research.entity_research",
             "description": "Deep research on a company using o4-mini-deep-research",
             "params": ["client_info", "target_info"]
-        })
-    except ImportError:
-        pass
-    
-    try:
-        from workers.scrapers import base_scraper
-        workers.append({
-            "name": "scrapers.base_scraper",
-            "description": "Base scraper template",
-            "params": ["url", "config"]
         })
     except ImportError:
         pass
@@ -129,7 +178,6 @@ def list_workers():
 def submit_job(job: JobSubmit):
     """Submit a new job to the queue."""
     
-    # Map worker name to function
     worker_map = {}
     
     try:
@@ -144,12 +192,11 @@ def submit_job(job: JobSubmit):
             detail=f"Unknown worker: {job.worker}. Available: {list(worker_map.keys())}"
         )
     
-    # Queue the job
     rq_job = queue.enqueue(
         worker_map[job.worker],
         kwargs=job.params,
         job_timeout=job.timeout,
-        result_ttl=86400,  # Keep results for 24 hours
+        result_ttl=86400,
         failure_ttl=86400
     )
     
@@ -178,15 +225,12 @@ def get_job(job_id: str):
         ended_at=job.ended_at.isoformat() if job.ended_at else None
     )
     
-    # Add result if finished
     if job.get_status() == "finished":
         response.result = job.result
     
-    # Add error if failed
     if job.get_status() == "failed":
         response.error = str(job.exc_info) if job.exc_info else "Unknown error"
     
-    # Add progress from meta
     if job.meta:
         response.progress = job.meta
     
@@ -195,17 +239,13 @@ def get_job(job_id: str):
 
 @app.get("/jobs/{job_id}/stream")
 async def stream_job(job_id: str):
-    """
-    Stream job progress via Server-Sent Events.
-    Connect to this from your frontend for real-time updates.
-    """
+    """Stream job progress via Server-Sent Events."""
     try:
         job = Job.fetch(job_id, connection=redis_conn)
     except Exception:
         raise HTTPException(status_code=404, detail="Job not found")
     
     async def event_generator():
-        """Generate SSE events."""
         last_meta = None
         
         while True:
@@ -213,22 +253,19 @@ async def stream_job(job_id: str):
                 job.refresh()
                 status = job.get_status()
                 
-                # Send progress updates if meta changed
                 if job.meta != last_meta:
                     last_meta = job.meta.copy() if job.meta else {}
                     yield f"data: {json.dumps({'type': 'progress', 'status': status, 'meta': last_meta})}\n\n"
                 
-                # Job finished
                 if status == "finished":
                     yield f"data: {json.dumps({'type': 'complete', 'result': job.result})}\n\n"
                     break
                 
-                # Job failed
                 if status == "failed":
                     yield f"data: {json.dumps({'type': 'error', 'error': str(job.exc_info)})}\n\n"
                     break
                 
-                await asyncio.sleep(1)  # Poll every second
+                await asyncio.sleep(1)
                 
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
@@ -237,22 +274,18 @@ async def stream_job(job_id: str):
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
     )
 
 
 @app.get("/jobs")
 def list_jobs(
-    status: Optional[str] = Query(None, description="Filter by status: queued, started, finished, failed"),
-    limit: int = Query(50, description="Max jobs to return")
+    status: Optional[str] = Query(None),
+    limit: int = Query(50)
 ):
     """List recent jobs."""
     jobs = []
     
-    # Get jobs from different registries based on status filter
     if status is None or status == "queued":
         for job_id in queue.job_ids[:limit]:
             try:
@@ -262,20 +295,6 @@ def list_jobs(
                     "status": job.get_status(),
                     "worker": job.func_name,
                     "created_at": job.created_at.isoformat() if job.created_at else None
-                })
-            except:
-                pass
-    
-    if status is None or status == "started":
-        started = StartedJobRegistry(queue=queue)
-        for job_id in started.get_job_ids()[:limit]:
-            try:
-                job = Job.fetch(job_id, connection=redis_conn)
-                jobs.append({
-                    "job_id": job.id,
-                    "status": "started",
-                    "worker": job.func_name,
-                    "started_at": job.started_at.isoformat() if job.started_at else None
                 })
             except:
                 pass
@@ -322,24 +341,14 @@ def cancel_job(job_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# =============================================================================
-# Run Automation from Registry
-# =============================================================================
-
 class RunAutomation(BaseModel):
-    """Run an automation by slug."""
     slug: str
     override_config: Optional[dict] = None
 
 
 @app.post("/run")
 def run_automation_endpoint(request: RunAutomation):
-    """
-    Run an automation from the registry.
-    
-    This is the main way to execute automations - just provide the slug.
-    Config is loaded from the registry, or you can override it.
-    """
+    """Run an automation from the registry."""
     from workers.runner import run_automation
     
     rq_job = queue.enqueue(
