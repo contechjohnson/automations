@@ -22,6 +22,18 @@ Build standardized directives that follow the DoE framework with explicit prompt
 - Adding a Prompt Index section to a directive
 - Reviewing directive compliance with the standard
 
+## Prime Directives (Reference First)
+
+Before creating any directive, reference the prime directives to ensure alignment:
+
+| File | Check |
+|------|-------|
+| `directives/prime/columnline.md` | Does this serve a Columnline priority or client? |
+| `directives/prime/prologis.md` | Does this affect day job capacity? |
+| `directives/prime/life.md` | Is there bandwidth for this? |
+
+Prime directives capture the "why" behind work. Regular directives capture the "how."
+
 ## Quick Start
 
 1. Determine directive type (Simple LLM, Agent, Scraper, or Background Job)
