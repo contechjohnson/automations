@@ -201,7 +201,7 @@ def prompt(
         from workers.logger import ExecutionLogger
         logger = ExecutionLogger(
             worker_name=f"ai.prompt.{model}",
-            automation_slug=name,
+            automation_slug=None,  # Prompts are not automations - avoid FK error
             input_data={"prompt_name": name, "model": model, "variables": variables},
             tags=tags or [model, name.split(".")[0]],
             notes=notes,
@@ -280,3 +280,4 @@ def gemini(prompt: str, model: str = "gemini-2.5-flash", system: str = None) -> 
     gemini_model = genai.GenerativeModel(model_id, system_instruction=system)
     response = gemini_model.generate_content(prompt)
     return response.text
+
