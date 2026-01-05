@@ -44,10 +44,28 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 
 | Resource | URL |
 |----------|-----|
-| **Droplet** | `64.225.120.95` (SSH: `root@64.225.120.95`) |
+| **API (ngrok)** | `https://lazy-bella-unevolutional.ngrok-free.dev` |
+| **API (direct)** | `http://64.225.120.95:8000` |
 | **API Docs** | http://64.225.120.95:8000/docs |
 | **RQ Dashboard** | http://64.225.120.95:9181 |
+| **Droplet SSH** | `root@64.225.120.95` |
 | **GitHub** | https://github.com/contechjohnson/automations |
+
+### API URLs
+
+**Use ngrok URL for AI models and external integrations** - it's HTTPS and available everywhere.
+
+**Use direct IP for local testing** - faster, no SSL overhead.
+
+```bash
+# ngrok (preferred for AI models) - requires header
+NGROK_URL="https://lazy-bella-unevolutional.ngrok-free.dev"
+curl -H "ngrok-skip-browser-warning: true" "$NGROK_URL/health"
+
+# Direct IP (for local testing)
+DIRECT_URL="http://64.225.120.95:8000"
+curl "$DIRECT_URL/health"
+```
 
 ---
 
@@ -373,25 +391,37 @@ systemctl restart automations-api automations-worker
 2. Logs are captured in Supabase
 3. Environment matches production
 
+### API Base URLs
+
+```bash
+# For AI models and external integrations (HTTPS, globally accessible)
+API_URL="https://lazy-bella-unevolutional.ngrok-free.dev"
+
+# For local testing (faster, no SSL)
+API_URL="http://64.225.120.95:8000"
+```
+
+**Note:** ngrok requires the header `ngrok-skip-browser-warning: true` to bypass the warning page.
+
 ### Standard Test Flow
 
 ```bash
-# 1. Commit and push changes
+# 1. Commit and push changes (auto-deploys via GitHub)
 git add -A && git commit -m "Your changes" && git push
 
-# 2. Deploy to droplet (requires SSH access)
-ssh root@64.225.120.95 "cd /opt/automations && git pull && systemctl restart automations-api"
+# 2. Test via API endpoint (use either URL)
+# Via ngrok (for AI models):
+curl -X POST "https://lazy-bella-unevolutional.ngrok-free.dev/test/prompt" \
+  -H "Content-Type: application/json" \
+  -H "ngrok-skip-browser-warning: true" \
+  -d '{"prompt_name": "model-test", "variables": {"question": "Your test question"}, "model": "gpt-4.1-mini"}'
 
-# 3. Test via API endpoint
+# Via direct IP (for local testing):
 curl -X POST "http://64.225.120.95:8000/test/prompt" \
   -H "Content-Type: application/json" \
-  -d '{
-    "prompt_name": "model-test",
-    "variables": {"question": "Your test question"},
-    "model": "gpt-4.1-mini"
-  }'
+  -d '{"prompt_name": "model-test", "variables": {"question": "Your test question"}, "model": "gpt-4.1-mini"}'
 
-# 4. Verify logs were created
+# 3. Verify logs were created
 curl "http://64.225.120.95:8000/logs?limit=3"
 ```
 
