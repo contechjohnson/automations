@@ -19,6 +19,10 @@ This project follows a **directive-orchestration-execution** framework:
 - **RQ for background jobs** - Long-running tasks queue via Redis, monitor via Dashboard
 - **Self-annealing** - Every skill has LEARNINGS.md for continuous improvement
 
+### New Here?
+
+See [docs/INFRASTRUCTURE-COOKBOOK.md](docs/INFRASTRUCTURE-COOKBOOK.md) for the complete setup guide - covers everything from DigitalOcean droplet creation to SSL configuration.
+
 ---
 
 ## Skills
