@@ -89,10 +89,12 @@ status = {
 
 ### 3. Monitor in Dashboard
 
-- **URL:** http://64.225.120.95:9181
+- **URL:** http://64.225.120.95:9181 (HTTP only - access from trusted network)
 - View queues, jobs, workers
 - See failed jobs with tracebacks
 - Retry failed jobs from UI
+
+**Note:** The RQ Dashboard is internal-only (HTTP). Access directly when on the network or via SSH tunnel.
 
 ## Progress Updates (Streamable)
 
@@ -305,18 +307,35 @@ See `LEARNINGS.md` for known issues and fixes.
 
 **Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
 
-**API Endpoints:**
-| Endpoint | URL |
-|----------|-----|
-| Production API | `https://api.columnline.dev` |
-| Health Check | `https://api.columnline.dev/health` |
-| Test Prompt | `POST https://api.columnline.dev/test/prompt` |
-| Logs | `https://api.columnline.dev/logs` |
+### Infrastructure URLs
 
-**Infrastructure:**
-| Resource | Location |
-|----------|----------|
-| Droplet IP | `64.225.120.95` |
-| RQ Dashboard | `http://64.225.120.95:9181` |
+| Resource | URL | Notes |
+|----------|-----|-------|
+| Production API | `https://api.columnline.dev` | Primary endpoint |
+| Health Check | `https://api.columnline.dev/health` | - |
+| Test Prompt | `https://api.columnline.dev/test/prompt` | POST endpoint |
+| Logs | `https://api.columnline.dev/logs` | - |
+| RQ Dashboard | `http://64.225.120.95:9181` | HTTP only, internal access |
+| Droplet SSH | `root@64.225.120.95` | For debugging |
+
+### Files Referenced by This Skill
+
+| Resource | Path |
+|----------|------|
+| Runner | `workers/runner.py` |
+| Logger | `workers/logger.py` |
+
+### Environment Variables Required
+
+| Variable | Purpose |
+|----------|---------|
+| `REDIS_URL` | Redis connection - from `.env` locally, paste directly in web |
 
 **Credentials:** Add `CREDENTIALS.md` to your Claude project for API keys. Cannot be stored in repo due to GitHub secret scanning.
+
+### Related Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `building-automations` | Create workers that RQ will run |
+| `querying-database` | View execution logs from RQ jobs |

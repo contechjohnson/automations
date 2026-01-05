@@ -137,6 +137,8 @@ curl -s "https://api.columnline.dev/automations/entity-research" | python3 -m js
 
 For complex queries, use the helper script:
 
+**Note:** The helper script requires local Python with dependencies. For web Claude Code, use the API endpoints above (no credentials needed).
+
 ```bash
 # Run from project root
 python3 .claude/skills/querying-database/scripts/query_db.py --help
@@ -265,3 +267,47 @@ These pre-built views simplify common queries:
 | `v_automations_by_state` | Geographic breakdown |
 
 Access via Supabase client or raw SQL.
+
+---
+
+## Resources
+
+**Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
+
+### Web vs Local Usage
+
+| Method | Web Claude | Local Claude | Credentials |
+|--------|-----------|--------------|-------------|
+| API endpoints (`/logs`, `/automations`) | ✅ Works | ✅ Works | None needed |
+| Helper script | ❌ Requires Python | ✅ Works | None |
+| Direct Supabase SQL | ❌ Needs env vars | ✅ Works | `SUPABASE_*` from `.env` |
+
+**For web Claude Code:** Use the API endpoints - they work without any credentials and provide full query capabilities.
+
+### Files Referenced by This Skill
+
+| Resource | Path |
+|----------|------|
+| Helper Script | `.claude/skills/querying-database/scripts/query_db.py` |
+
+### API Endpoints
+
+| Endpoint | URL |
+|----------|-----|
+| Production API | `https://api.columnline.dev` |
+| Logs Endpoint | `https://api.columnline.dev/logs` |
+| Automations Endpoint | `https://api.columnline.dev/automations` |
+
+### Environment Variables (for Direct SQL only)
+
+| Variable | Purpose |
+|----------|---------|
+| `SUPABASE_URL` | Database URL - from `.env` locally |
+| `SUPABASE_SERVICE_ROLE_KEY` | Admin access - from `.env` locally |
+
+### Related Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `building-automations` | Create automations that log to this database |
+| `using-rq-workers` | Background jobs also log here |

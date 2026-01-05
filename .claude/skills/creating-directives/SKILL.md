@@ -272,7 +272,11 @@ Before finalizing a directive, verify:
 
 ## Templates
 
-- [Directive Template](templates/directive-template.md) - Full template to copy
+| Template | Path |
+|----------|------|
+| Directive Template | `.claude/skills/creating-directives/templates/directive-template.md` |
+
+**GitHub:** [View Template](https://github.com/contechjohnson/automations/blob/main/.claude/skills/creating-directives/templates/directive-template.md)
 
 ## Self-Annealing
 
@@ -287,7 +291,18 @@ After any directive update issue:
 
 **Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
 
-**API Endpoints:**
+### File Locations
+
+| Artifact | Path |
+|----------|------|
+| Directive Template | `.claude/skills/creating-directives/templates/directive-template.md` |
+| Directives Folder | `directives/` |
+| Prime Directives | `directives/prime/` |
+| Prompts Folder | `prompts/` |
+| Workers Folder | `workers/` |
+
+### API Endpoints
+
 | Endpoint | URL |
 |----------|-----|
 | Production API | `https://api.columnline.dev` |
@@ -295,10 +310,18 @@ After any directive update issue:
 | Test Prompt | `POST https://api.columnline.dev/test/prompt` |
 | Logs | `https://api.columnline.dev/logs` |
 
-**Infrastructure:**
+### Infrastructure
+
 | Resource | Location |
 |----------|----------|
 | Droplet IP | `64.225.120.95` |
 | RQ Dashboard | `http://64.225.120.95:9181` |
 
 **Credentials:** Add `CREDENTIALS.md` to your Claude project for API keys. Cannot be stored in repo due to GitHub secret scanning.
+
+### Related Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `building-automations` | Implement the directive after writing it |
+| `using-rq-workers` | If directive needs background processing |

@@ -570,18 +570,49 @@ See `LEARNINGS.md` for known issues and fixes.
 
 **Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
 
-**API Endpoints:**
+### Templates
+
+| Template | Path |
+|----------|------|
+| Simple Worker | `.claude/skills/building-automations/templates/simple-worker.py.md` |
+| Multi-Step Worker | `.claude/skills/building-automations/templates/multi-step-worker.py.md` |
+| Available Models | `.claude/skills/building-automations/reference/available-models.md` |
+
+**GitHub:** [View Templates](https://github.com/contechjohnson/automations/tree/main/.claude/skills/building-automations/templates)
+
+### API Endpoints
+
 | Endpoint | URL |
 |----------|-----|
 | Production API | `https://api.columnline.dev` |
+| API Docs | `https://api.columnline.dev/docs` |
 | Health Check | `https://api.columnline.dev/health` |
-| Test Prompt | `POST https://api.columnline.dev/test/prompt` |
+| Test Prompt | `https://api.columnline.dev/test/prompt` |
 | Logs | `https://api.columnline.dev/logs` |
 
-**Infrastructure:**
+### Infrastructure
+
 | Resource | Location |
 |----------|----------|
 | Droplet IP | `64.225.120.95` |
 | RQ Dashboard | `http://64.225.120.95:9181` |
 
+### Environment Variables Required
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | LLM calls - from `.env` locally, paste directly in web |
+| `SUPABASE_URL` | Execution logging |
+| `SUPABASE_SERVICE_ROLE_KEY` | Execution logging |
+| `FIRECRAWL_API_KEY` | Agent tools (optional) |
+| `GOOGLE_API_KEY` | Gemini models (optional) |
+
 **Credentials:** Add `CREDENTIALS.md` to your Claude project for API keys. Cannot be stored in repo due to GitHub secret scanning.
+
+### Related Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `creating-directives` | Write directive before implementing |
+| `using-rq-workers` | Queue long-running jobs |
+| `querying-database` | Check logs and status |

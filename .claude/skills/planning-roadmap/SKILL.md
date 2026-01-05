@@ -32,7 +32,8 @@ Before adding anything to the roadmap, ask:
 
 All planning lives in a single document:
 
-**[docs/ROADMAP.md](../../../docs/ROADMAP.md)**
+- **Path:** `docs/ROADMAP.md`
+- **GitHub:** [View Roadmap](https://github.com/contechjohnson/automations/blob/main/docs/ROADMAP.md)
 
 This is the source of truth. Always read it before discussing priorities, and update it when plans change.
 
@@ -100,3 +101,23 @@ Move items down or to backlog if:
 **Weekly:** Quick scan - anything completed? Priorities changed?
 **When adding automation:** Check if it's on roadmap, update status
 **When client feedback:** Re-evaluate priorities based on real needs
+
+---
+
+## Resources
+
+**Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
+
+### Key Files
+
+| File | Path | Purpose |
+|------|------|---------|
+| Roadmap | `docs/ROADMAP.md` | Single source of truth for priorities |
+| CLAUDE.md | `CLAUDE.md` | Project overview and conventions |
+
+### Related Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `creating-directives` | After prioritizing, create directive for new automation |
+| `building-automations` | Implement planned automations |
