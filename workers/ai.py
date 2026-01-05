@@ -49,20 +49,20 @@ def ai(prompt: str, model: str = "gpt-4.1", system: str = None, temperature: flo
     return response.choices[0].message.content
 
 
-def research(prompt: str, model: str = "o4-mini-deep-research", background: bool = False) -> dict:
+def research(prompt: str, model: str = "o4-mini-deep-research", background: bool = True) -> dict:
     """
     Deep research using OpenAI Responses API with web search.
     
     Uses /v1/responses endpoint with web_search_preview tool.
-    Can optionally run in background mode for long tasks.
+    Defaults to background mode since these take 5-10 minutes.
     
     Args:
         prompt: Research query/task
         model: Deep research model (o4-mini-deep-research or o3-deep-research)
-        background: If True, returns immediately with response ID for polling
+        background: If True (default), returns immediately with response ID for polling
         
     Returns:
-        dict with output, sources, usage info
+        dict with output, sources, usage info (or response_id if background)
     """
     model_id = OPENAI_MODELS.get(model, model)
     
@@ -72,7 +72,6 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
         "input": prompt,
         "tools": [
             {"type": "web_search_preview"},
-            {"type": "code_interpreter", "container": {"type": "auto"}}
         ],
         "reasoning": {"summary": "auto"},
     }
@@ -80,7 +79,7 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
     if background:
         request_params["background"] = True
     
-    # Use responses endpoint
+    # Use responses endpoint with long timeout
     response = openai_client.responses.create(**request_params)
     
     # If background mode, return response ID for polling
@@ -91,27 +90,26 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
             "model": model_id,
         }
     
-    # Extract output from response
+    # Synchronous mode - extract output
     output_text = ""
     annotations = []
     
-    for item in response.output:
-        if hasattr(item, 'content'):
-            for content in item.content:
-                if hasattr(content, 'text'):
-                    output_text += content.text
-                if hasattr(content, 'annotations'):
-                    annotations.extend(content.annotations)
-    
-    # If no structured output, try output_text attribute
-    if not output_text and hasattr(response, 'output_text'):
+    if hasattr(response, 'output_text'):
         output_text = response.output_text
+    elif hasattr(response, 'output'):
+        for item in response.output:
+            if hasattr(item, 'content'):
+                for content in item.content:
+                    if hasattr(content, 'text'):
+                        output_text += content.text
+                    if hasattr(content, 'annotations'):
+                        annotations.extend(content.annotations)
     
     return {
         "output": output_text,
         "annotations": annotations,
         "model": model_id,
-        "usage": response.usage.model_dump() if response.usage else None,
+        "usage": response.usage.model_dump() if hasattr(response, 'usage') and response.usage else None,
     }
 
 
@@ -136,25 +134,25 @@ def poll_research(response_id: str) -> dict:
         output_text = ""
         annotations = []
         
-        for item in response.output:
-            if hasattr(item, 'content'):
-                for content in item.content:
-                    if hasattr(content, 'text'):
-                        output_text += content.text
-                    if hasattr(content, 'annotations'):
-                        annotations.extend(content.annotations)
-        
-        if not output_text and hasattr(response, 'output_text'):
+        if hasattr(response, 'output_text'):
             output_text = response.output_text
+        elif hasattr(response, 'output'):
+            for item in response.output:
+                if hasattr(item, 'content'):
+                    for content in item.content:
+                        if hasattr(content, 'text'):
+                            output_text += content.text
+                        if hasattr(content, 'annotations'):
+                            annotations.extend(content.annotations)
             
         result["output"] = output_text
-        result["annotations"] = annotations
-        result["usage"] = response.usage.model_dump() if response.usage else None
+        result["annotations"] = [str(a) for a in annotations]  # Serialize
+        result["usage"] = response.usage.model_dump() if hasattr(response, 'usage') and response.usage else None
     
     return result
 
 
-def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: str = None) -> dict:
+def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: str = None, background: bool = False) -> dict:
     """
     Load a prompt template, interpolate variables, and run it.
     
@@ -163,9 +161,11 @@ def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: st
         variables: Dict of variables to interpolate ({{var}} syntax)
         model: Model to use
         system: Optional system prompt override
+        background: For deep research, return response_id instead of waiting
         
     Returns:
         dict with prompt_name, model, input, output, elapsed_seconds, usage
+        (or response_id if background mode)
     """
     # Load prompt file
     prompt_path = PROMPTS_DIR / f"{name}.md"
@@ -187,8 +187,17 @@ def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: st
     start = time.time()
     
     # Route to appropriate function based on model
-    if model in DEEP_RESEARCH_MODELS or model.startswith("o4-mini-deep") or model.startswith("o3-deep"):
-        result = research(prompt_template, model=model)
+    is_deep_research = model in DEEP_RESEARCH_MODELS or model.startswith("o4-mini-deep") or model.startswith("o3-deep")
+    
+    if is_deep_research:
+        result = research(prompt_template, model=model, background=background)
+        if background:
+            return {
+                "prompt_name": name,
+                "model": model,
+                "response_id": result.get("response_id"),
+                "status": result.get("status"),
+            }
         output = result.get("output", "")
         usage = result.get("usage")
     else:
