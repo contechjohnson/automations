@@ -44,9 +44,10 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 
 | Resource | URL |
 |----------|-----|
+| **API (production)** | `https://api.columnline.dev` |
 | **API (ngrok)** | `https://lazy-bella-unevolutional.ngrok-free.dev` |
 | **API (direct)** | `http://64.225.120.95:8000` |
-| **API Docs** | http://64.225.120.95:8000/docs |
+| **API Docs** | https://api.columnline.dev/docs |
 | **RQ Dashboard** | http://64.225.120.95:9181 |
 | **Droplet SSH** | `root@64.225.120.95` |
 | **GitHub** | https://github.com/contechjohnson/automations |
@@ -55,25 +56,23 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 
 | URL | When to Use | Header Required |
 |-----|-------------|-----------------|
-| `https://lazy-bella-unevolutional.ngrok-free.dev` | **AI models, external integrations, webhooks** | `ngrok-skip-browser-warning: true` |
-| `http://64.225.120.95:8000` | Local testing (faster) | None |
+| `https://api.columnline.dev` | **Production - works everywhere** | None |
+| `https://lazy-bella-unevolutional.ngrok-free.dev` | Backup/legacy | `ngrok-skip-browser-warning: true` |
+| `http://64.225.120.95:8000` | Direct IP (fastest) | None |
 
-**Why ngrok matters:** External AI tools (ChatGPT, Claude API, webhooks) can only reach HTTPS endpoints. The ngrok URL is the only way to test integrations with external services before deploying them. Always verify the ngrok endpoint works before relying on it for production integrations.
+**Use `api.columnline.dev` by default.** It has proper SSL via Caddy and works from anywhere - local, cloud, AI models, webhooks.
 
 ```bash
-# ngrok (for AI models/external integrations) - requires header
-NGROK_URL="https://lazy-bella-unevolutional.ngrok-free.dev"
-curl -H "ngrok-skip-browser-warning: true" "$NGROK_URL/health"
+# Production URL (recommended)
+API_URL="https://api.columnline.dev"
+curl "$API_URL/health"
 
-# Direct IP (for local/internal testing)
-DIRECT_URL="http://64.225.120.95:8000"
-curl "$DIRECT_URL/health"
+# Direct IP (for debugging, fastest)
+curl "http://64.225.120.95:8000/health"
+
+# ngrok (backup, requires header)
+curl -H "ngrok-skip-browser-warning: true" "https://lazy-bella-unevolutional.ngrok-free.dev/health"
 ```
-
-**Troubleshooting ngrok SSL errors:** If you get TLS/SSL errors locally (e.g., `record layer failure`, `packet length too long`), your network may be intercepting HTTPS traffic (corporate firewall, ISP inspection, VPN). Try:
-1. Test from a different network
-2. Test from the droplet: `ssh root@64.225.120.95 "curl -H 'ngrok-skip-browser-warning: true' https://lazy-bella-unevolutional.ngrok-free.dev/health"`
-3. Use the direct IP for local testing (http works fine)
 
 ---
 
@@ -402,14 +401,12 @@ systemctl restart automations-api automations-worker
 ### API Base URLs
 
 ```bash
-# For AI models and external integrations (HTTPS, globally accessible)
-API_URL="https://lazy-bella-unevolutional.ngrok-free.dev"
+# Production (recommended - works everywhere)
+API_URL="https://api.columnline.dev"
 
-# For local testing (faster, no SSL)
+# Direct IP (fastest, for debugging)
 API_URL="http://64.225.120.95:8000"
 ```
-
-**Note:** ngrok requires the header `ngrok-skip-browser-warning: true` to bypass the warning page.
 
 ### Standard Test Flow
 
@@ -417,20 +414,13 @@ API_URL="http://64.225.120.95:8000"
 # 1. Commit and push changes (auto-deploys via GitHub)
 git add -A && git commit -m "Your changes" && git push
 
-# 2. Test via API endpoint (use either URL)
-# Via ngrok (for AI models):
-curl -X POST "https://lazy-bella-unevolutional.ngrok-free.dev/test/prompt" \
-  -H "Content-Type: application/json" \
-  -H "ngrok-skip-browser-warning: true" \
-  -d '{"prompt_name": "model-test", "variables": {"question": "Your test question"}, "model": "gpt-4.1-mini"}'
-
-# Via direct IP (for local testing):
-curl -X POST "http://64.225.120.95:8000/test/prompt" \
+# 2. Test via API endpoint
+curl -X POST "https://api.columnline.dev/test/prompt" \
   -H "Content-Type: application/json" \
   -d '{"prompt_name": "model-test", "variables": {"question": "Your test question"}, "model": "gpt-4.1-mini"}'
 
 # 3. Verify logs were created
-curl "http://64.225.120.95:8000/logs?limit=3"
+curl "https://api.columnline.dev/logs?limit=3"
 ```
 
 ### API Endpoints
@@ -449,17 +439,17 @@ curl "http://64.225.120.95:8000/logs?limit=3"
 
 ```bash
 # Test gpt-4.1-mini
-curl -X POST "http://64.225.120.95:8000/test/prompt" \
+curl -X POST "https://api.columnline.dev/test/prompt" \
   -H "Content-Type: application/json" \
   -d '{"prompt_name": "model-test", "variables": {"question": "What is cloud computing?"}, "model": "gpt-4.1-mini"}'
 
 # Test gpt-4.1
-curl -X POST "http://64.225.120.95:8000/test/prompt" \
+curl -X POST "https://api.columnline.dev/test/prompt" \
   -H "Content-Type: application/json" \
   -d '{"prompt_name": "model-test", "variables": {"question": "What is cloud computing?"}, "model": "gpt-4.1"}'
 
 # Compare in logs
-curl "http://64.225.120.95:8000/logs?limit=2"
+curl "https://api.columnline.dev/logs?limit=2"
 ```
 
 ### Local Testing (Only When Necessary)
