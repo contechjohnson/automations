@@ -52,33 +52,33 @@ def list_prompts():
 def test_prompt(request: PromptRequest):
     """Test a prompt with full logging to Supabase."""
     from workers.ai import prompt, DEEP_RESEARCH_MODELS
-    
+
     try:
         is_deep_research = (
-            request.model in DEEP_RESEARCH_MODELS or 
-            request.model.startswith("o4-mini-deep") or 
+            request.model in DEEP_RESEARCH_MODELS or
+            request.model.startswith("o4-mini-deep") or
             request.model.startswith("o3-deep")
         )
-        
+
         if is_deep_research and not request.background:
             return {
                 "error": "Deep research models require background=True",
                 "hint": "Set background=True, then poll /research/poll with the response_id"
             }
-        
-        # Build tags
+
+        # Build tags - always include model and prompt name
         tags = request.tags or []
-        tags.extend([request.model, request.prompt_name.split(".")[0]])
-        
+        tags.extend(["api", request.model, request.prompt_name])
+
         result = prompt(
             name=request.prompt_name,
             variables=request.variables,
             model=request.model,
             background=request.background,
-            log=request.log,  # Pass logging flag
+            log=True,  # ALWAYS log - non-negotiable
             tags=list(set(tags)),  # Dedupe tags
         )
-        
+
         return {
             "status": "submitted" if request.background else "completed",
             "prompt_name": result["prompt_name"],
@@ -87,7 +87,7 @@ def test_prompt(request: PromptRequest):
             "output": result.get("output"),
             "response_id": result.get("response_id"),
             "input_length": len(result.get("input", "")) if result.get("input") else 0,
-            "logged": request.log,
+            "logged": True,
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -99,23 +99,23 @@ def test_prompt(request: PromptRequest):
 def start_research(request: PromptRequest):
     """Start deep research in background mode."""
     from workers.ai import prompt
-    
+
     try:
         if not request.model.startswith("o"):
             request.model = "o4-mini-deep-research"
-        
+
         tags = request.tags or []
-        tags.extend([request.model, "deep-research"])
-        
+        tags.extend(["api", "research", request.model, request.prompt_name])
+
         result = prompt(
             name=request.prompt_name,
             variables=request.variables,
             model=request.model,
             background=True,
-            log=True,  # Always log research
+            log=True,  # ALWAYS log - non-negotiable
             tags=list(set(tags)),
         )
-        
+
         return {
             "status": "submitted",
             "response_id": result.get("response_id"),
@@ -129,7 +129,7 @@ def start_research(request: PromptRequest):
 def poll_research(request: ResearchPollRequest):
     """Poll for deep research completion."""
     from workers.ai import poll_research as poll_fn
-    
+
     try:
         result = poll_fn(request.response_id)
         return result
@@ -141,21 +141,21 @@ def poll_research(request: ResearchPollRequest):
 def get_logs(limit: int = 20, status: Optional[str] = None, prompt_name: Optional[str] = None):
     """View recent execution logs."""
     from supabase import create_client
-    
+
     supabase = create_client(
         os.environ["SUPABASE_URL"],
         os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     )
-    
+
     query = supabase.table("execution_logs").select("*").order("started_at", desc=True).limit(limit)
-    
+
     if status:
         query = query.eq("status", status)
     if prompt_name:
         query = query.ilike("worker_name", f"%{prompt_name}%")
-    
+
     result = query.execute()
-    
+
     return {
         "logs": result.data,
         "count": len(result.data)
@@ -166,17 +166,17 @@ def get_logs(limit: int = 20, status: Optional[str] = None, prompt_name: Optiona
 def get_log(log_id: str):
     """Get a specific log entry with full input/output."""
     from supabase import create_client
-    
+
     supabase = create_client(
         os.environ["SUPABASE_URL"],
         os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     )
-    
+
     result = supabase.table("execution_logs").select("*").eq("id", log_id).execute()
-    
+
     if not result.data:
         raise HTTPException(status_code=404, detail="Log not found")
-    
+
     return result.data[0]
 
 

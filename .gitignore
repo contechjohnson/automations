@@ -34,3 +34,7 @@ data/
 *.csv
 *.json
 !package.json
+
+# Temp folder (keep .gitkeep, ignore everything else)
+tmp/*
+!tmp/.gitkeep

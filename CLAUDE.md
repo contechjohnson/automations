@@ -2,6 +2,44 @@
 
 Central automation server for scrapers, research tasks, and background jobs.
 
+## Philosophy
+
+This project follows a **directive-orchestration-execution** framework:
+
+1. **Directives** define what an automation should do (contracts, behavior) in `directives/`
+2. **Skills** guide Claude in building automations consistently in `.claude/skills/`
+3. **Workers** implement the actual logic using AI abstractions in `workers/`
+
+### Core Principles
+
+- **Skills over slash commands** - Natural language triggers, no memorization needed
+- **Directives as contracts** - Define inputs, outputs, behavior in markdown
+- **Provider-agnostic AI** - Models/prompts hot-swappable via `workers/ai.py`
+- **FULL TRACE LOGGING** - Every LLM call logs inputs, outputs, timing to Supabase (non-negotiable)
+- **RQ for background jobs** - Long-running tasks queue via Redis, monitor via Dashboard
+- **Self-annealing** - Every skill has LEARNINGS.md for continuous improvement
+
+---
+
+## Skills
+
+Skills trigger automatically based on semantic matching. Just describe what you want.
+
+| Skill | When It Activates |
+|-------|-------------------|
+| `creating-skills` | "create a skill", "make this reusable", "I keep doing this" |
+| `creating-directives` | "new directive", "define automation", "standardize" |
+| `building-automations` | "build automation", "implement directive", "create worker" |
+| `using-rq-workers` | "queue job", "background", "RQ", "long running" |
+
+### To build a new automation:
+
+1. Write a directive in `directives/{slug}.md`
+2. Say "build this automation" or "implement the {name} directive"
+3. Claude will follow the `building-automations` skill
+
+---
+
 ## Quick Links
 
 | Resource | URL |
@@ -36,10 +74,39 @@ ln -sf ../COLUMNLINE_AI_APP_V1/.env .env
 
 ---
 
+## Temporary Files (`tmp/`)
+
+**All test outputs, reports, downloads, and scratch files go in `tmp/`.**
+
+This folder is gitignored (except `.gitkeep`). Use it for:
+- Test run outputs (JSON, CSV, reports)
+- Downloaded files and attachments
+- Debug dumps and logs
+- Any ephemeral artifacts
+
+**Do NOT create files elsewhere** unless there's a clear reason (e.g., new prompt in `prompts/`, new worker in `workers/`).
+
+```python
+# Example: Save test output
+output_path = "tmp/entity-research-test-2025-01-04.json"
+with open(output_path, "w") as f:
+    json.dump(result, f, indent=2)
+```
+
+---
+
 ## Architecture
 
 ```
 automations/
+├── .claude/
+│   └── skills/           # Claude Code skills
+│       ├── creating-skills/
+│       ├── creating-directives/
+│       ├── building-automations/
+│       └── using-rq-workers/
+├── tmp/                  # ALL temporary/test outputs go here (gitignored)
+├── directives/           # Automation specifications
 ├── api/                  # FastAPI endpoints
 │   ├── main.py           # Job submission, status
 │   └── registry.py       # Automation registry CRUD
@@ -49,7 +116,6 @@ automations/
 │   ├── logger.py         # Supabase execution logging
 │   ├── runner.py         # Dynamic worker runner
 │   ├── templates/        # Reusable scraper templates
-│   ├── scrapers/         # Custom scrapers
 │   └── research/         # Research workers
 ├── prompts/              # Markdown prompt files ({{var}} interpolation)
 ├── database/             # Supabase schema
@@ -60,29 +126,62 @@ automations/
 
 ## AI Abstraction Layer
 
+### Decision Flowchart: What to Use
+
+```
+Need to call an LLM?
+│
+├─ Single question/task, no web access needed?
+│  └─ Use prompt() with log=True
+│
+├─ Need to search the web or scrape websites?
+│  │
+│  ├─ Quick web search + reasoning?
+│  │  └─ Use agent_prompt(..., agent_type="research")
+│  │
+│  ├─ Need to scrape specific URLs?
+│  │  └─ Use agent_prompt(..., agent_type="firecrawl")
+│  │
+│  └─ Deep research (5-10 min, comprehensive)?
+│     └─ Use prompt(..., model="o4-mini-deep-research", background=True)
+│
+└─ Long-running or chained operations?
+   └─ Use RQ (see using-rq-workers skill)
+```
+
+### Key Difference: prompt() vs agent_prompt()
+
+| | `prompt()` | `agent_prompt()` |
+|---|---|---|
+| **Calls** | Single LLM call | Multiple LLM calls (turns) |
+| **Tools** | None | Web search, Firecrawl scraping |
+| **Speed** | Fast (seconds) | Slower (LLM decides when done) |
+| **Use for** | Transform, summarize, extract | Research, scrape, verify |
+
 ### Simple LLM Calls (`workers/ai.py`)
 
 ```python
 from workers.ai import ai, prompt, research
 
-# Direct call
+# Direct call (no logging)
 result = ai("What is 2+2?", model="gpt-4.1")
 
-# With prompt file + logging
+# With prompt file + MANDATORY logging
 result = prompt(
-    "find-lead.entity-research",
+    "entity-research",
     variables={"lead": {...}, "clientName": "Acme"},
-    model="gpt-5.2",
-    log=True,  # Logs to Supabase execution_logs
-    tags=["test", "entity-research"]
+    model="gpt-4.1",
+    log=True,  # ALWAYS use log=True
+    tags=["entity-research", "gpt-4.1"]
 )
 
 # Deep research (background mode - returns response_id for polling)
 result = prompt(
-    "find-lead.entity-research",
+    "deep-research",
     variables={...},
     model="o4-mini-deep-research",
-    background=True
+    background=True,  # Required for deep research
+    log=True
 )
 # Poll with: poll_research(result["response_id"])
 ```
@@ -104,7 +203,7 @@ result = run_full_agent("Deep research on Acme Corp", model="gpt-5.2")
 # With prompt file
 from workers.agent import agent_prompt
 result = agent_prompt(
-    "find-lead.entity-research",
+    "entity-research",
     variables={...},
     model="gpt-4.1",
     agent_type="firecrawl",  # "research" | "firecrawl" | "full"
@@ -120,8 +219,71 @@ result = agent_prompt(
 | `gpt-4.1-mini` | Chat Completions | Cheaper, still good |
 | `gpt-5.2` | Chat Completions | Best quality |
 | `o4-mini` | Chat Completions | Reasoning |
-| `o4-mini-deep-research` | Responses API | Web research (5-10 min) |
+| `o4-mini-deep-research` | Responses API | Web research (5-10 min, use background=True) |
 | `gemini-2.5-flash` | Gemini | Fast, grounded search |
+
+---
+
+## Execution Logging (NON-NEGOTIABLE)
+
+Every automation MUST log. This provides full observability.
+
+### Option 1: Automatic via `log=True`
+
+```python
+result = prompt("name", vars, model="gpt-4.1", log=True, tags=["tag1"])
+```
+
+### Option 2: Manual via ExecutionLogger
+
+```python
+from workers.logger import ExecutionLogger
+
+log = ExecutionLogger(
+    worker_name="scrapers.permits",
+    automation_slug="va-permits",
+    input_data=params,
+    tags=["permits", "va"]
+)
+
+try:
+    result = do_work()
+    log.success(result)
+except Exception as e:
+    log.fail(e)
+```
+
+### What Gets Logged
+
+| Field | Description |
+|-------|-------------|
+| `worker_name` | e.g., `ai.prompt.gpt-4.1` |
+| `automation_slug` | e.g., `entity-research` |
+| `input` | Full input parameters (JSONB) |
+| `output` | Full output response (JSONB) |
+| `runtime_seconds` | Execution time |
+| `status` | `running`, `success`, `failed` |
+| `tags` | Filterable tags |
+
+### Observability Queries
+
+```sql
+-- Recent executions for an automation
+SELECT * FROM execution_logs
+WHERE automation_slug = 'my-automation'
+ORDER BY started_at DESC LIMIT 10;
+
+-- Failed jobs
+SELECT * FROM v_failed_logs;
+
+-- All runs for a tag
+SELECT * FROM execution_logs WHERE 'entity-research' = ANY(tags);
+
+-- Slow executions
+SELECT * FROM execution_logs
+WHERE runtime_seconds > 30
+ORDER BY runtime_seconds DESC;
+```
 
 ---
 
@@ -130,38 +292,49 @@ result = agent_prompt(
 Prompts live in `prompts/` as markdown files with `{{variable}}` interpolation.
 
 ```markdown
-# prompts/find-lead.entity-research.md
+# prompts/entity-research.md
 
 Research this company: {{lead}}
 
 Client context: {{clientName}}
 ```
 
-**Naming convention:** `{automation-slug}.{step}.md`
+**Naming convention:** `{automation-slug}.md` or `{automation-slug}.{step}.md`
 
 ---
 
-## Execution Logging
+## RQ Background Jobs
 
-All executions can be logged to Supabase `execution_logs` table:
+For long-running tasks (deep research, batch processing):
 
 ```python
-# Automatic via log=True parameter
-result = prompt("my-prompt", vars, model="gpt-4.1", log=True, tags=["test"])
+from redis import Redis
+from rq import Queue
 
-# Manual via ExecutionLogger
-from workers.logger import ExecutionLogger
+redis_conn = Redis.from_url(os.environ["REDIS_URL"])
+q = Queue(connection=redis_conn)
 
-log = ExecutionLogger("scrapers.permits", input_params)
-log.note("Testing new endpoint")
-log.tag("test", "permits")
-
-try:
-    result = do_work()
-    log.success(result)
-except Exception as e:
-    log.fail(e)
+# Queue job with extended timeout
+job = q.enqueue(
+    "workers.runner.run_automation",
+    "my-automation-slug",
+    job_timeout="30m"
+)
 ```
+
+**Monitor:** http://64.225.120.95:9181
+
+See `using-rq-workers` skill for full patterns.
+
+---
+
+## Supabase Tables
+
+| Table | Purpose |
+|-------|---------|
+| `automations` | Registry of available automations |
+| `automation_runs` | Job-level execution history (one per run) |
+| `execution_logs` | Detail-level AI traces (one per LLM call) |
 
 ---
 
@@ -196,22 +369,18 @@ systemctl restart automations-api automations-worker
 ## Testing Locally
 
 ```bash
-# Run a prompt test
-python test_entity_research.py gpt-4.1
-
 # Run API locally
 uvicorn api.main:app --reload --port 8000
+
+# Test a prompt (outputs go to tmp/)
+python -c "
+from workers.ai import prompt
+result = prompt('entity-research', {'lead': {...}}, model='gpt-4.1', log=True)
+import json
+with open('tmp/test-output.json', 'w') as f:
+    json.dump(result, f, indent=2)
+"
 ```
-
----
-
-## Supabase Tables
-
-| Table | Purpose |
-|-------|---------|
-| `automations` | Registry of available automations |
-| `automation_runs` | Execution history |
-| `execution_logs` | Detailed AI execution logs (inputs/outputs) |
 
 ---
 
