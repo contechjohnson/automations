@@ -73,30 +73,29 @@ def register_automation(
     # Check if already exists
     existing = supabase.table("automations").select("slug").eq("slug", slug).execute()
 
-    # Build data dict, only including non-None values
-    # This handles schema mismatches gracefully
+    # Build data dict with fields known to exist in the table
+    # Based on database/schema.sql - these columns are guaranteed to exist
     data = {
         "name": name,
         "type": type,
-        "status": status,
-        "updated_at": datetime.utcnow().isoformat(),
     }
 
-    # Optional fields - only include if provided
-    if description is not None:
-        data["description"] = description
-    if category is not None:
-        data["category"] = category
-    if worker_path is not None:
-        data["worker_path"] = worker_path
-    if template is not None:
-        data["template"] = template
-    if geography is not None:
-        data["geography"] = geography
-    if config is not None:
-        data["config"] = config
-    if tags is not None:
-        data["tags"] = tags
+    # Add optional fields if provided - these should exist per schema.sql
+    # but we add them conditionally to handle partial schema deployment
+    optional_fields = {
+        "description": description,
+        "category": category,
+        "worker_path": worker_path,
+        "template": template,
+        "geography": geography,
+        "config": config,
+        "tags": tags,
+        "status": status if status != "active" else None,  # Only include if not default
+    }
+
+    for field, value in optional_fields.items():
+        if value is not None:
+            data[field] = value
 
     if existing.data:
         # Update existing
