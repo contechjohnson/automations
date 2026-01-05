@@ -3,7 +3,7 @@
 Simple AI module - swap models by changing a string.
 
 Usage:
-    from workers.ai import ai, agent, research
+    from workers.ai import ai, agent, research, prompt
     
     # Basic calls
     result = ai("Summarize this...")                      # Default: gpt-4.1
@@ -17,15 +17,81 @@ Usage:
     
     # Agent with tools
     result = agent("Scrape this URL and summarize", tools=firecrawl_tools)
+    
+    # Prompt templates
+    result = prompt("find-lead.entity-research", {"lead": data}, model="gpt-4.1")
 """
 
 import os
 import time
+import json
+from pathlib import Path
 from openai import OpenAI
 import google.generativeai as genai
 
 # Initialize clients
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Prompts directory - relative to project root
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+
+
+def prompt(
+    name: str,
+    variables: dict = None,
+    model: str = "gpt-4.1",
+    system: str = None,
+) -> dict:
+    """
+    Load a prompt template, fill variables, call model.
+    
+    Args:
+        name: Prompt filename without extension (e.g., "find-lead.entity-research")
+        variables: Dict of {{variable}} replacements
+        model: Model to use
+        system: Optional system message
+    
+    Returns:
+        dict with prompt_name, model, input, output, usage
+    """
+    # Load prompt file
+    prompt_path = PROMPTS_DIR / f"{name}.md"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Prompt not found: {prompt_path}")
+    
+    prompt_text = prompt_path.read_text()
+    
+    # Fill variables
+    if variables:
+        for key, value in variables.items():
+            # Convert dicts/lists to formatted JSON
+            if isinstance(value, (dict, list)):
+                val_str = json.dumps(value, indent=2)
+            else:
+                val_str = str(value)
+            prompt_text = prompt_text.replace(f"{{{{{key}}}}}", val_str)
+    
+    start_time = time.time()
+    
+    # Route to appropriate function
+    if "deep-research" in model:
+        result = research(prompt_text, model=model)
+        output = result.get("content")
+        usage = result.get("usage")
+    else:
+        output = ai(prompt_text, model=model, system=system)
+        usage = None  # TODO: capture usage from ai() call
+    
+    elapsed = time.time() - start_time
+    
+    return {
+        "prompt_name": name,
+        "model": model,
+        "input": prompt_text,
+        "output": output,
+        "elapsed_seconds": round(elapsed, 2),
+        "usage": usage,
+    }
 
 
 def ai(
