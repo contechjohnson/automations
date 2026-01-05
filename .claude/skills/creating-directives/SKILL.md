@@ -280,3 +280,25 @@ After any directive update issue:
 1. Document in `LEARNINGS.md`
 2. Update this skill if pattern needs change
 3. Update template if section needs refinement
+
+---
+
+## Resources
+
+**Repository:** [contechjohnson/automations](https://github.com/contechjohnson/automations)
+
+**API Endpoints:**
+| Endpoint | URL |
+|----------|-----|
+| Production API | `https://api.columnline.dev` |
+| Health Check | `https://api.columnline.dev/health` |
+| Test Prompt | `POST https://api.columnline.dev/test/prompt` |
+| Logs | `https://api.columnline.dev/logs` |
+
+**Infrastructure:**
+| Resource | Location |
+|----------|----------|
+| Droplet IP | `64.225.120.95` |
+| RQ Dashboard | `http://64.225.120.95:9181` |
+
+**Credentials:** Add `CREDENTIALS.md` to your Claude project for API keys. Cannot be stored in repo due to GitHub secret scanning.
