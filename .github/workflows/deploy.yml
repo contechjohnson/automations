@@ -1,4 +1,4 @@
-name: Deploy to DigitalOcean
+name: Deploy to Droplet
 
 on:
   push:
@@ -8,22 +8,17 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
       - name: Deploy to droplet
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.DROPLET_IP }}
+          host: 64.225.120.95
           username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.DROPLET_PASSWORD }}
           script: |
             cd /opt/automations
             git pull origin main
-            docker-compose down
-            docker-compose build --no-cache
-            docker-compose up -d
-            docker-compose ps
+            source venv/bin/activate
+            pip install -r requirements.txt --quiet
+            systemctl restart automations-api automations-worker
             echo "✅ Deployed at $(date)"
