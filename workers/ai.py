@@ -161,6 +161,7 @@ def prompt(
     log: bool = False,
     tags: list = None,
     notes: str = None,
+    automation_slug: str = None,
 ) -> dict:
     """
     Load a prompt template, interpolate variables, and run it.
@@ -174,6 +175,7 @@ def prompt(
         log: If True, log execution to Supabase execution_logs table
         tags: Optional tags for the log entry
         notes: Optional notes for the log entry
+        automation_slug: Links log to automations table. If not provided, derived from prompt name.
 
     Returns:
         dict with prompt_name, model, input, output, elapsed_seconds, usage
@@ -199,11 +201,13 @@ def prompt(
     logger = None
     if log:
         from workers.logger import ExecutionLogger
+        # Derive slug from prompt name if not provided (e.g., "entity-research" from "entity-research.md")
+        slug = automation_slug or name.split(".")[0]
         logger = ExecutionLogger(
             worker_name=f"ai.prompt.{model}",
-            automation_slug=None,  # Prompts are not automations - avoid FK error
+            automation_slug=slug,
             input_data={"prompt_name": name, "model": model, "variables": variables},
-            tags=tags or [model, name.split(".")[0]],
+            tags=tags or [model, slug],
             notes=notes,
         )
 

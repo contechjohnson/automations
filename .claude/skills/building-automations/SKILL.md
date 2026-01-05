@@ -328,17 +328,95 @@ See [reference/available-models.md](reference/available-models.md) for full list
 | Worker | `workers/{category}/{name}.py` | `workers/research/entity.py` |
 | API Endpoint | `api/main.py` | Add new route |
 
+## Registration (Single-Motion Workflow)
+
+When you build an automation, **register it immediately** so logs link properly.
+
+### Why Register?
+
+| Benefit | Without Registration | With Registration |
+|---------|---------------------|-------------------|
+| Log queries | Can't filter by automation | `WHERE automation_slug = 'my-auto'` |
+| Discoverability | Hidden in code | Listed in `/automations` API |
+| Run history | No job tracking | Full `automation_runs` history |
+| Observability | Fragmented | Complete trace chain |
+
+### How to Register
+
+After creating worker and prompt files, call `register_automation()`:
+
+```python
+from workers.register import register_automation
+
+register_automation(
+    slug="entity-research",           # MUST match prompt file name
+    name="Entity Research",
+    type="research",                  # research | scraper | enrichment | workflow
+    category="intelligence",          # Optional sub-category
+    description="Research an entity using LLM",
+    worker_path="workers/research/entity.py",
+    tags=["research", "gpt-4.1"]
+)
+```
+
+Or via API:
+
+```bash
+curl -X POST "https://api.columnline.dev/automations/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slug": "entity-research",
+    "name": "Entity Research",
+    "type": "research",
+    "category": "intelligence",
+    "worker_path": "workers/research/entity.py",
+    "tags": ["research", "gpt-4.1"]
+  }'
+```
+
+### Slug Auto-Derivation
+
+The `prompt()` function automatically derives `automation_slug` from the prompt name:
+
+```python
+# These are equivalent:
+prompt("entity-research", log=True)  # slug auto-derived as "entity-research"
+prompt("entity-research", log=True, automation_slug="entity-research")  # explicit
+```
+
+For multi-step prompts like `entity-research.step1.md`, the slug derives from the first part: `entity-research`.
+
+### Observability Chain
+
+```
+automations (registry)
+    │
+    ├── automation_runs (job history via runner.py)
+    │   └── Links via: automation_id
+    │
+    └── execution_logs (LLM traces via log=True)
+        └── Links via: automation_slug
+```
+
+Query example:
+```sql
+-- All logs for an automation
+SELECT * FROM execution_logs
+WHERE automation_slug = 'entity-research'
+ORDER BY started_at DESC;
+```
+
 ## Integration Checklist
 
 After implementing:
 
 - [ ] Prompt file created in `prompts/`
 - [ ] Worker file created with `log=True`
+- [ ] **Automation registered** via `register_automation()` or API
 - [ ] API endpoint added (if needed)
 - [ ] Added to `template_runners` in `workers/runner.py` (if registry-based)
-- [ ] Registered in Supabase `automations` table (if tracked)
 - [ ] **Deployed and tested via real API** (see Testing Workflow below)
-- [ ] **Verified in `execution_logs` table** (critical!)
+- [ ] **Verified in `execution_logs` table with correct `automation_slug`** (critical!)
 
 ## Testing Workflow (MANDATORY)
 

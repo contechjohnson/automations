@@ -365,6 +365,67 @@ See `using-rq-workers` skill for full patterns.
 | `automation_runs` | Job-level execution history (one per run) |
 | `execution_logs` | Detail-level AI traces (one per LLM call) |
 
+### Observability Chain
+
+The three tables link together for full traceability:
+
+```
+automations (registry)
+    │
+    ├── automation_runs (job history)
+    │   └── Links via: automation_id
+    │   └── Written by: runner.py
+    │
+    └── execution_logs (LLM traces)
+        └── Links via: automation_slug
+        └── Written by: prompt(..., log=True)
+```
+
+**Key field:** `automation_slug` - auto-derived from prompt name (e.g., `entity-research.md` → `entity-research`)
+
+### Registration
+
+When building a new automation, register it so logs link properly:
+
+```python
+from workers.register import register_automation
+
+register_automation(
+    slug="entity-research",           # MUST match prompt file name
+    name="Entity Research",
+    type="research",                  # research | scraper | enrichment | workflow
+    category="intelligence",
+    worker_path="workers/research/entity.py",
+    tags=["research", "gpt-4.1"]
+)
+```
+
+Or via API:
+
+```bash
+curl -X POST "https://api.columnline.dev/automations/register" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "entity-research", "name": "Entity Research", "type": "research"}'
+```
+
+### Query Examples
+
+```sql
+-- All logs for an automation
+SELECT * FROM execution_logs
+WHERE automation_slug = 'entity-research'
+ORDER BY started_at DESC;
+
+-- Join automation with its logs
+SELECT a.name, e.status, e.runtime_seconds, e.started_at
+FROM automations a
+JOIN execution_logs e ON a.slug = e.automation_slug
+WHERE a.slug = 'entity-research';
+
+-- Automation registry
+SELECT slug, name, type, status FROM automations;
+```
+
 ---
 
 ## Deployment

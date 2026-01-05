@@ -191,3 +191,58 @@ def list_workers():
             }
         ]
     }
+
+
+# =============================================================================
+# AUTOMATION REGISTRY ENDPOINTS
+# =============================================================================
+
+class AutomationRegister(BaseModel):
+    slug: str
+    name: str
+    type: str  # research, scraper, enrichment, workflow
+    category: Optional[str] = None
+    description: Optional[str] = None
+    worker_path: Optional[str] = None
+    tags: Optional[List[str]] = None
+    status: str = "active"
+
+
+@app.post("/automations/register")
+def register_automation_endpoint(request: AutomationRegister):
+    """Register a new automation in the registry."""
+    from workers.register import register_automation
+
+    try:
+        result = register_automation(
+            slug=request.slug,
+            name=request.name,
+            type=request.type,
+            category=request.category,
+            description=request.description,
+            worker_path=request.worker_path,
+            tags=request.tags,
+            status=request.status,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/automations/{slug}/status")
+def check_automation_status(slug: str):
+    """Check if an automation is registered and get its status."""
+    from workers.register import check_registration
+    return check_registration(slug)
+
+
+@app.get("/automations")
+def list_automations_endpoint(
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    category: Optional[str] = None
+):
+    """List all automations with optional filters."""
+    from workers.register import list_automations
+    automations = list_automations(type=type, status=status, category=category)
+    return {"automations": automations, "count": len(automations)}
