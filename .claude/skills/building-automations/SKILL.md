@@ -342,25 +342,30 @@ After implementing:
 
 ## Testing Workflow (MANDATORY)
 
-**ALWAYS test via the real API endpoint**, not local scripts.
+**YOU ARE NOT DONE UNTIL YOU TEST ON THE REAL PRODUCTION API.**
+
+An automation is NOT complete until:
+1. Code is pushed to GitHub (auto-deploys)
+2. You call `https://api.columnline.dev` and get a real response
+3. You verify the log exists in Supabase `execution_logs` table
 
 ```bash
-# API URLs (use ngrok for AI models, direct for local testing)
-NGROK_URL="https://lazy-bella-unevolutional.ngrok-free.dev"
-DIRECT_URL="http://64.225.120.95:8000"
+# Production API - use this ALWAYS
+API_URL="https://api.columnline.dev"
 
 # 1. Commit and push (auto-deploys via GitHub)
 git add -A && git commit -m "Add {automation-name}" && git push
 
-# 2. Test via API (ngrok requires the header)
-curl -X POST "$NGROK_URL/test/prompt" \
+# 2. Test via PRODUCTION API (not local, not direct IP)
+curl -X POST "$API_URL/test/prompt" \
   -H "Content-Type: application/json" \
-  -H "ngrok-skip-browser-warning: true" \
   -d '{"prompt_name": "your-prompt", "variables": {...}, "model": "gpt-4.1"}'
 
-# 3. Verify logs
-curl "$DIRECT_URL/logs?limit=1"
+# 3. Verify log was created
+curl "$API_URL/logs?limit=1"
 ```
+
+**Why production API?** This URL works from everywhere - your Mac, Claude Code, Claude.ai, Vercel, webhooks. If it works here, it works everywhere.
 
 See `CLAUDE.md` > Testing Workflow for full details.
 
