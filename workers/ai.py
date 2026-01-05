@@ -16,7 +16,7 @@ openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 # Model mappings
 OPENAI_MODELS = {
     "gpt-5.2": "gpt-5.2",
-    "gpt-4.1": "gpt-4.1", 
+    "gpt-4.1": "gpt-4.1",
     "gpt-4.1-mini": "gpt-4.1-mini",
     "gpt-4.1-nano": "gpt-4.1-nano",
     "o3": "o3",
@@ -34,38 +34,38 @@ def ai(prompt: str, model: str = "gpt-4.1", system: str = None, temperature: flo
     For standard chat completions (not deep research).
     """
     model_id = OPENAI_MODELS.get(model, model)
-    
+
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    
+
     response = openai_client.chat.completions.create(
         model=model_id,
         messages=messages,
         temperature=temperature,
     )
-    
+
     return response.choices[0].message.content
 
 
 def research(prompt: str, model: str = "o4-mini-deep-research", background: bool = True) -> dict:
     """
     Deep research using OpenAI Responses API with web search.
-    
+
     Uses /v1/responses endpoint with web_search_preview tool.
     Defaults to background mode since these take 5-10 minutes.
-    
+
     Args:
         prompt: Research query/task
         model: Deep research model (o4-mini-deep-research or o3-deep-research)
         background: If True (default), returns immediately with response ID for polling
-        
+
     Returns:
         dict with output, sources, usage info (or response_id if background)
     """
     model_id = OPENAI_MODELS.get(model, model)
-    
+
     # Build request for Responses API
     request_params = {
         "model": model_id,
@@ -75,13 +75,13 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
         ],
         "reasoning": {"summary": "auto"},
     }
-    
+
     if background:
         request_params["background"] = True
-    
+
     # Use responses endpoint with long timeout
     response = openai_client.responses.create(**request_params)
-    
+
     # If background mode, return response ID for polling
     if background:
         return {
@@ -89,11 +89,11 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
             "status": response.status,
             "model": model_id,
         }
-    
+
     # Synchronous mode - extract output
     output_text = ""
     annotations = []
-    
+
     if hasattr(response, 'output_text'):
         output_text = response.output_text
     elif hasattr(response, 'output'):
@@ -104,7 +104,7 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
                         output_text += content.text
                     if hasattr(content, 'annotations'):
                         annotations.extend(content.annotations)
-    
+
     return {
         "output": output_text,
         "annotations": annotations,
@@ -116,24 +116,24 @@ def research(prompt: str, model: str = "o4-mini-deep-research", background: bool
 def poll_research(response_id: str) -> dict:
     """
     Poll for background research completion.
-    
+
     Args:
         response_id: ID from background research request
-        
+
     Returns:
         dict with status, and output if completed
     """
     response = openai_client.responses.retrieve(response_id)
-    
+
     result = {
         "response_id": response_id,
         "status": response.status,
     }
-    
+
     if response.status == "completed":
         output_text = ""
         annotations = []
-        
+
         if hasattr(response, 'output_text'):
             output_text = response.output_text
         elif hasattr(response, 'output'):
@@ -144,25 +144,37 @@ def poll_research(response_id: str) -> dict:
                             output_text += content.text
                         if hasattr(content, 'annotations'):
                             annotations.extend(content.annotations)
-            
+
         result["output"] = output_text
         result["annotations"] = [str(a) for a in annotations]  # Serialize
         result["usage"] = response.usage.model_dump() if hasattr(response, 'usage') and response.usage else None
-    
+
     return result
 
 
-def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: str = None, background: bool = False) -> dict:
+def prompt(
+    name: str,
+    variables: dict = None,
+    model: str = "gpt-4.1",
+    system: str = None,
+    background: bool = False,
+    log: bool = False,
+    tags: list = None,
+    notes: str = None,
+) -> dict:
     """
     Load a prompt template, interpolate variables, and run it.
-    
+
     Args:
         name: Prompt file name (without .md extension)
         variables: Dict of variables to interpolate ({{var}} syntax)
         model: Model to use
         system: Optional system prompt override
         background: For deep research, return response_id instead of waiting
-        
+        log: If True, log execution to Supabase execution_logs table
+        tags: Optional tags for the log entry
+        notes: Optional notes for the log entry
+
     Returns:
         dict with prompt_name, model, input, output, elapsed_seconds, usage
         (or response_id if background mode)
@@ -171,9 +183,9 @@ def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: st
     prompt_path = PROMPTS_DIR / f"{name}.md"
     if not prompt_path.exists():
         raise FileNotFoundError(f"Prompt not found: {prompt_path}")
-    
+
     prompt_template = prompt_path.read_text()
-    
+
     # Interpolate variables
     if variables:
         for key, value in variables.items():
@@ -182,38 +194,66 @@ def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: st
             if isinstance(value, (dict, list)):
                 value = json.dumps(value, indent=2)
             prompt_template = prompt_template.replace(placeholder, str(value))
-    
+
+    # Optional logging
+    logger = None
+    if log:
+        from workers.logger import ExecutionLogger
+        logger = ExecutionLogger(
+            worker_name=f"ai.prompt.{model}",
+            automation_slug=name,
+            input_data={"prompt_name": name, "model": model, "variables": variables},
+            tags=tags or [model, name.split(".")[0]],
+            notes=notes,
+        )
+
     # Execute
     start = time.time()
-    
-    # Route to appropriate function based on model
-    is_deep_research = model in DEEP_RESEARCH_MODELS or model.startswith("o4-mini-deep") or model.startswith("o3-deep")
-    
-    if is_deep_research:
-        result = research(prompt_template, model=model, background=background)
-        if background:
-            return {
-                "prompt_name": name,
-                "model": model,
-                "response_id": result.get("response_id"),
-                "status": result.get("status"),
-            }
-        output = result.get("output", "")
-        usage = result.get("usage")
-    else:
-        output = ai(prompt_template, model=model, system=system)
-        usage = None
-    
-    elapsed = time.time() - start
-    
-    return {
-        "prompt_name": name,
-        "model": model,
-        "input": prompt_template,
-        "output": output,
-        "elapsed_seconds": round(elapsed, 2),
-        "usage": usage,
-    }
+
+    try:
+        # Route to appropriate function based on model
+        is_deep_research = model in DEEP_RESEARCH_MODELS or model.startswith("o4-mini-deep") or model.startswith("o3-deep")
+
+        if is_deep_research:
+            result = research(prompt_template, model=model, background=background)
+            if background:
+                # Background mode - return response_id for polling
+                background_result = {
+                    "prompt_name": name,
+                    "model": model,
+                    "response_id": result.get("response_id"),
+                    "status": result.get("status"),
+                }
+                if logger:
+                    logger.meta("background", True)
+                    logger.meta("response_id", result.get("response_id"))
+                return background_result
+            output = result.get("output", "")
+            usage = result.get("usage")
+        else:
+            output = ai(prompt_template, model=model, system=system)
+            usage = None
+
+        elapsed = time.time() - start
+
+        result_data = {
+            "prompt_name": name,
+            "model": model,
+            "input": prompt_template,
+            "output": output,
+            "elapsed_seconds": round(elapsed, 2),
+            "usage": usage,
+        }
+
+        if logger:
+            logger.success(result_data)
+
+        return result_data
+
+    except Exception as e:
+        if logger:
+            logger.fail(e)
+        raise
 
 
 # Gemini support (optional)
@@ -235,7 +275,7 @@ def gemini(prompt: str, model: str = "gemini-2.5-flash", system: str = None) -> 
     """Gemini completion."""
     if not GEMINI_AVAILABLE:
         raise ImportError("google-generativeai not installed")
-    
+
     model_id = GEMINI_MODELS.get(model, model)
     gemini_model = genai.GenerativeModel(model_id, system_instruction=system)
     response = gemini_model.generate_content(prompt)
