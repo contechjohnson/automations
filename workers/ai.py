@@ -1,348 +1,233 @@
-# workers/ai.py
 """
-Simple AI module - swap models by changing a string.
-
-Usage:
-    from workers.ai import ai, agent, research, prompt
-    
-    # Basic calls
-    result = ai("Summarize this...")                      # Default: gpt-4.1
-    result = ai("Analyze...", model="gpt-5.2")           # Flagship
-    result = ai("Quick check", model="gpt-4.1-mini")     # Fast/cheap
-    result = ai("Think hard", model="o4-mini")           # Reasoning
-    result = ai("Summarize", model="gemini-2.5-flash")   # Google
-    
-    # Deep research (async, can take minutes)
-    result = research("Research Virginia data centers")
-    
-    # Agent with tools
-    result = agent("Scrape this URL and summarize", tools=firecrawl_tools)
-    
-    # Prompt templates
-    result = prompt("find-lead.entity-research", {"lead": data}, model="gpt-4.1")
+Universal AI Module - Updated with proper Responses API for deep research
 """
-
 import os
-import time
 import json
+import time
 from pathlib import Path
 from openai import OpenAI
-import google.generativeai as genai
+
+# Prompts directory
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 # Initialize clients
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# Prompts directory - relative to project root
-PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+# Model mappings
+OPENAI_MODELS = {
+    "gpt-5.2": "gpt-5.2",
+    "gpt-4.1": "gpt-4.1", 
+    "gpt-4.1-mini": "gpt-4.1-mini",
+    "gpt-4.1-nano": "gpt-4.1-nano",
+    "o3": "o3",
+    "o4-mini": "o4-mini",
+    "o4-mini-deep-research": "o4-mini-deep-research-2025-06-26",
+    "o3-deep-research": "o3-deep-research-2025-06-26",
+}
+
+DEEP_RESEARCH_MODELS = ["o4-mini-deep-research", "o3-deep-research", "o4-mini-deep-research-2025-06-26", "o3-deep-research-2025-06-26"]
 
 
-def prompt(
-    name: str,
-    variables: dict = None,
-    model: str = "gpt-4.1",
-    system: str = None,
-) -> dict:
+def ai(prompt: str, model: str = "gpt-4.1", system: str = None, temperature: float = 0.7) -> str:
     """
-    Load a prompt template, fill variables, call model.
+    Universal AI completion - routes to appropriate provider/model.
+    For standard chat completions (not deep research).
+    """
+    model_id = OPENAI_MODELS.get(model, model)
+    
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    
+    response = openai_client.chat.completions.create(
+        model=model_id,
+        messages=messages,
+        temperature=temperature,
+    )
+    
+    return response.choices[0].message.content
+
+
+def research(prompt: str, model: str = "o4-mini-deep-research", background: bool = False) -> dict:
+    """
+    Deep research using OpenAI Responses API with web search.
+    
+    Uses /v1/responses endpoint with web_search_preview tool.
+    Can optionally run in background mode for long tasks.
     
     Args:
-        name: Prompt filename without extension (e.g., "find-lead.entity-research")
-        variables: Dict of {{variable}} replacements
-        model: Model to use
-        system: Optional system message
-    
+        prompt: Research query/task
+        model: Deep research model (o4-mini-deep-research or o3-deep-research)
+        background: If True, returns immediately with response ID for polling
+        
     Returns:
-        dict with prompt_name, model, input, output, usage
+        dict with output, sources, usage info
+    """
+    model_id = OPENAI_MODELS.get(model, model)
+    
+    # Build request for Responses API
+    request_params = {
+        "model": model_id,
+        "input": prompt,
+        "tools": [
+            {"type": "web_search_preview"},
+            {"type": "code_interpreter", "container": {"type": "auto"}}
+        ],
+        "reasoning": {"summary": "auto"},
+    }
+    
+    if background:
+        request_params["background"] = True
+    
+    # Use responses endpoint
+    response = openai_client.responses.create(**request_params)
+    
+    # If background mode, return response ID for polling
+    if background:
+        return {
+            "response_id": response.id,
+            "status": response.status,
+            "model": model_id,
+        }
+    
+    # Extract output from response
+    output_text = ""
+    annotations = []
+    
+    for item in response.output:
+        if hasattr(item, 'content'):
+            for content in item.content:
+                if hasattr(content, 'text'):
+                    output_text += content.text
+                if hasattr(content, 'annotations'):
+                    annotations.extend(content.annotations)
+    
+    # If no structured output, try output_text attribute
+    if not output_text and hasattr(response, 'output_text'):
+        output_text = response.output_text
+    
+    return {
+        "output": output_text,
+        "annotations": annotations,
+        "model": model_id,
+        "usage": response.usage.model_dump() if response.usage else None,
+    }
+
+
+def poll_research(response_id: str) -> dict:
+    """
+    Poll for background research completion.
+    
+    Args:
+        response_id: ID from background research request
+        
+    Returns:
+        dict with status, and output if completed
+    """
+    response = openai_client.responses.retrieve(response_id)
+    
+    result = {
+        "response_id": response_id,
+        "status": response.status,
+    }
+    
+    if response.status == "completed":
+        output_text = ""
+        annotations = []
+        
+        for item in response.output:
+            if hasattr(item, 'content'):
+                for content in item.content:
+                    if hasattr(content, 'text'):
+                        output_text += content.text
+                    if hasattr(content, 'annotations'):
+                        annotations.extend(content.annotations)
+        
+        if not output_text and hasattr(response, 'output_text'):
+            output_text = response.output_text
+            
+        result["output"] = output_text
+        result["annotations"] = annotations
+        result["usage"] = response.usage.model_dump() if response.usage else None
+    
+    return result
+
+
+def prompt(name: str, variables: dict = None, model: str = "gpt-4.1", system: str = None) -> dict:
+    """
+    Load a prompt template, interpolate variables, and run it.
+    
+    Args:
+        name: Prompt file name (without .md extension)
+        variables: Dict of variables to interpolate ({{var}} syntax)
+        model: Model to use
+        system: Optional system prompt override
+        
+    Returns:
+        dict with prompt_name, model, input, output, elapsed_seconds, usage
     """
     # Load prompt file
     prompt_path = PROMPTS_DIR / f"{name}.md"
     if not prompt_path.exists():
         raise FileNotFoundError(f"Prompt not found: {prompt_path}")
     
-    prompt_text = prompt_path.read_text()
+    prompt_template = prompt_path.read_text()
     
-    # Fill variables
+    # Interpolate variables
     if variables:
         for key, value in variables.items():
-            # Convert dicts/lists to formatted JSON
+            placeholder = "{{" + key + "}}"
+            # Convert dicts/lists to JSON string
             if isinstance(value, (dict, list)):
-                val_str = json.dumps(value, indent=2)
-            else:
-                val_str = str(value)
-            prompt_text = prompt_text.replace(f"{{{{{key}}}}}", val_str)
+                value = json.dumps(value, indent=2)
+            prompt_template = prompt_template.replace(placeholder, str(value))
     
-    start_time = time.time()
+    # Execute
+    start = time.time()
     
-    # Route to appropriate function
-    if "deep-research" in model:
-        result = research(prompt_text, model=model)
-        output = result.get("content")
+    # Route to appropriate function based on model
+    if model in DEEP_RESEARCH_MODELS or model.startswith("o4-mini-deep") or model.startswith("o3-deep"):
+        result = research(prompt_template, model=model)
+        output = result.get("output", "")
         usage = result.get("usage")
     else:
-        output = ai(prompt_text, model=model, system=system)
-        usage = None  # TODO: capture usage from ai() call
+        output = ai(prompt_template, model=model, system=system)
+        usage = None
     
-    elapsed = time.time() - start_time
+    elapsed = time.time() - start
     
     return {
         "prompt_name": name,
         "model": model,
-        "input": prompt_text,
+        "input": prompt_template,
         "output": output,
         "elapsed_seconds": round(elapsed, 2),
         "usage": usage,
     }
 
 
-def ai(
-    prompt: str,
-    model: str = "gpt-4.1",
-    system: str = None,
-    temperature: float = 0.7,
-    reasoning_effort: str = None,  # For o-series: low, medium, high
-) -> str:
-    """
-    Call any AI model. Returns text.
-    
-    Models:
-        OpenAI: gpt-5.2, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o4-mini
-        Gemini: gemini-2.5-pro, gemini-2.5-flash, gemini-3-flash-preview
-    """
-    
-    # === OpenAI Models ===
-    if model.startswith(("gpt-", "o3", "o4-mini")) and "deep-research" not in model:
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-        
-        params = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-        }
-        
-        # O-series models support reasoning_effort
-        if model.startswith(("o3", "o4")) and reasoning_effort:
-            params["reasoning_effort"] = reasoning_effort
-        
-        response = openai_client.chat.completions.create(**params)
-        return response.choices[0].message.content
-    
-    # === Gemini Models ===
-    if model.startswith("gemini"):
-        genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-        gmodel = genai.GenerativeModel(model)
-        
-        full_prompt = f"{system}\n\n{prompt}" if system else prompt
-        response = gmodel.generate_content(full_prompt)
-        return response.text
-    
-    raise ValueError(f"Unknown model: {model}")
-
-
-def research(
-    prompt: str,
-    model: str = "o4-mini-deep-research-2025-06-26",
-    timeout: int = 1800,  # 30 min max
-    poll_interval: int = 15,
-) -> dict:
-    """
-    Deep research using OpenAI Responses API.
-    
-    This is async and can take 5-30 minutes.
-    Returns dict with 'content', 'sources', 'usage'.
-    """
-    
-    # Submit research request with background mode
-    response = openai_client.responses.create(
-        model=model,
-        input=[{
-            "role": "user",
-            "content": [{"type": "input_text", "text": prompt}]
-        }],
-        reasoning={"summary": "auto"},
-        tools=[{"type": "web_search_preview"}],
-        background=True,
-    )
-    
-    response_id = response.id
-    status = response.status
-    
-    # Poll until complete
-    elapsed = 0
-    while status in ["queued", "in_progress"] and elapsed < timeout:
-        time.sleep(poll_interval)
-        elapsed += poll_interval
-        
-        response = openai_client.responses.retrieve(response_id)
-        status = response.status
-        
-        print(f"Research status: {status} ({elapsed}s elapsed)")
-    
-    if status != "completed":
-        return {
-            "content": None,
-            "status": status,
-            "error": f"Research did not complete. Status: {status}",
-            "elapsed_seconds": elapsed,
-        }
-    
-    # Extract the final text output
-    content = None
-    sources = []
-    for item in response.output:
-        if hasattr(item, 'content'):
-            for c in item.content:
-                if hasattr(c, 'text'):
-                    content = c.text
-        if item.type == "web_search_call":
-            sources.append(item)
-    
-    return {
-        "content": content,
-        "status": "completed",
-        "elapsed_seconds": elapsed,
-        "sources": sources,
-        "usage": response.usage.model_dump() if response.usage else None,
-    }
-
-
-def agent(
-    prompt: str,
-    tools: list = None,
-    model: str = "gpt-4.1",
-    system: str = "You are a helpful assistant that uses tools to accomplish tasks.",
-    max_turns: int = 10,
-) -> dict:
-    """
-    Run OpenAI Agent with tools.
-    
-    Example with Firecrawl:
-        from workers.ai import agent, firecrawl_tools
-        result = agent("Scrape example.com and summarize", tools=firecrawl_tools)
-    """
-    from agents import Agent, Runner
-    
-    agent_instance = Agent(
-        name="AutomationAgent",
-        instructions=system,
-        model=model,
-        tools=tools or [],
-    )
-    
-    result = Runner.run_sync(agent_instance, prompt)
-    
-    return {
-        "content": result.final_output,
-        "model": model,
-        "turns": len(result.new_items) if hasattr(result, 'new_items') else None,
-    }
-
-
-# === Pre-built Tools ===
-
-def firecrawl_scrape(url: str, formats: list = None) -> dict:
-    """Scrape a URL using Firecrawl API."""
-    import requests
-    
-    api_key = os.environ.get("FIRECRAWL_API_KEY")
-    response = requests.post(
-        "https://api.firecrawl.dev/v1/scrape",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={
-            "url": url,
-            "formats": formats or ["markdown"],
-        }
-    )
-    return response.json()
-
-
-def firecrawl_crawl(url: str, limit: int = 10) -> dict:
-    """Crawl a website using Firecrawl API."""
-    import requests
-    
-    api_key = os.environ.get("FIRECRAWL_API_KEY")
-    response = requests.post(
-        "https://api.firecrawl.dev/v1/crawl",
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={
-            "url": url,
-            "limit": limit,
-        }
-    )
-    return response.json()
-
-
-# For use with Agent SDK - wrap as function tools
+# Gemini support (optional)
 try:
-    from agents import function_tool
-    
-    @function_tool
-    def scrape_url(url: str) -> str:
-        """Scrape a webpage and return its content as markdown."""
-        result = firecrawl_scrape(url)
-        if result.get("success"):
-            return result.get("data", {}).get("markdown", "No content found")
-        return f"Error: {result.get('error', 'Unknown error')}"
-    
-    @function_tool
-    def crawl_website(url: str, max_pages: int = 10) -> str:
-        """Crawl a website and return content from multiple pages."""
-        result = firecrawl_crawl(url, limit=max_pages)
-        return str(result)
-    
-    # Export tools for easy access
-    firecrawl_tools = [scrape_url, crawl_website]
-    
+    import google.generativeai as genai
+    genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+    GEMINI_AVAILABLE = True
 except ImportError:
-    # agents package not installed
-    firecrawl_tools = []
+    GEMINI_AVAILABLE = False
 
-
-# === Quick aliases ===
-
-def quick(prompt: str, system: str = None) -> str:
-    """Fastest/cheapest - gpt-4.1-nano"""
-    return ai(prompt, model="gpt-4.1-nano", system=system)
-
-def smart(prompt: str, system: str = None) -> str:
-    """Smartest - gpt-5.2"""
-    return ai(prompt, model="gpt-5.2", system=system)
-
-def think(prompt: str, effort: str = "medium", system: str = None) -> str:
-    """Reasoning - o4-mini with configurable effort"""
-    return ai(prompt, model="o4-mini", reasoning_effort=effort, system=system)
-
-def gemini_call(prompt: str, model: str = "gemini-2.5-flash", system: str = None) -> str:
-    """Google Gemini models"""
-    return ai(prompt, model=model, system=system)
-
-
-# === Model info ===
-
-MODELS = {
-    # OpenAI Flagship
-    "gpt-5.2": {"provider": "openai", "type": "chat", "context": 256_000},
-    "gpt-4.1": {"provider": "openai", "type": "chat", "context": 1_000_000},
-    "gpt-4.1-mini": {"provider": "openai", "type": "chat", "context": 1_000_000},
-    "gpt-4.1-nano": {"provider": "openai", "type": "chat", "context": 1_000_000},
-    
-    # OpenAI Reasoning
-    "o3": {"provider": "openai", "type": "reasoning", "context": 200_000},
-    "o4-mini": {"provider": "openai", "type": "reasoning", "context": 200_000},
-    
-    # OpenAI Deep Research
-    "o4-mini-deep-research-2025-06-26": {"provider": "openai", "type": "research"},
-    "o3-deep-research-2025-06-26": {"provider": "openai", "type": "research"},
-    
-    # Google Gemini
-    "gemini-2.5-pro": {"provider": "google", "type": "chat", "context": 1_000_000},
-    "gemini-2.5-flash": {"provider": "google", "type": "chat", "context": 1_000_000},
-    "gemini-2.5-flash-lite": {"provider": "google", "type": "chat", "context": 1_000_000},
-    "gemini-3-flash-preview": {"provider": "google", "type": "chat", "context": 1_000_000},
+GEMINI_MODELS = {
+    "gemini-2.5-pro": "gemini-2.5-pro-preview-06-05",
+    "gemini-2.5-flash": "gemini-2.5-flash-preview-05-20",
+    "gemini-3-flash": "gemini-3.0-flash-preview",
 }
 
-def list_models():
-    """List all available models."""
-    return list(MODELS.keys())
+
+def gemini(prompt: str, model: str = "gemini-2.5-flash", system: str = None) -> str:
+    """Gemini completion."""
+    if not GEMINI_AVAILABLE:
+        raise ImportError("google-generativeai not installed")
+    
+    model_id = GEMINI_MODELS.get(model, model)
+    gemini_model = genai.GenerativeModel(model_id, system_instruction=system)
+    response = gemini_model.generate_content(prompt)
+    return response.text
