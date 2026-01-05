@@ -36,6 +36,27 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 | `building-automations` | "build automation", "implement directive", "create worker" |
 | `using-rq-workers` | "queue job", "background", "RQ", "long running" |
 
+
+---
+
+## Prime Directives
+
+Three files capture Connor's complete mental model across all domains. **Reference these before major work.**
+
+| Domain | File | Purpose |
+|--------|------|---------|
+| **Columnline** | `directives/prime/columnline.md` | Business: clients, revenue, strategy, capabilities |
+| **Prologis** | `directives/prime/prologis.md` | Day job: projects, relationships, career |
+| **Life** | `directives/prime/life.md` | Personal: health, relationships, priorities |
+
+**When to reference:**
+- Before building any automation (does it serve a priority?)
+- When planning work (what has capacity?)
+- When updating todos (which domain?)
+- When something changes (update the affected file)
+
+See `managing-mental-models` skill for full usage.
+
 ### To build a new automation:
 
 1. Write a directive in `directives/{slug}.md`
