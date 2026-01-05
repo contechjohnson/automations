@@ -366,20 +366,74 @@ systemctl restart automations-api automations-worker
 
 ---
 
-## Testing Locally
+## Testing Workflow
+
+**ALWAYS test via the real API endpoint**, not local scripts. This ensures:
+1. Code is deployed and running correctly
+2. Logs are captured in Supabase
+3. Environment matches production
+
+### Standard Test Flow
+
+```bash
+# 1. Commit and push changes
+git add -A && git commit -m "Your changes" && git push
+
+# 2. Deploy to droplet (requires SSH access)
+ssh root@64.225.120.95 "cd /opt/automations && git pull && systemctl restart automations-api"
+
+# 3. Test via API endpoint
+curl -X POST "http://64.225.120.95:8000/test/prompt" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_name": "model-test",
+    "variables": {"question": "Your test question"},
+    "model": "gpt-4.1-mini"
+  }'
+
+# 4. Verify logs were created
+curl "http://64.225.120.95:8000/logs?limit=3"
+```
+
+### API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/test/prompt` | POST | Run any prompt with logging |
+| `/research/start` | POST | Start deep research (background) |
+| `/research/poll` | POST | Poll for deep research completion |
+| `/logs` | GET | View recent execution logs |
+| `/logs/{id}` | GET | Get full log entry with input/output |
+| `/prompts` | GET | List available prompt files |
+| `/health` | GET | Health check |
+
+### Example: Test Model Comparison
+
+```bash
+# Test gpt-4.1-mini
+curl -X POST "http://64.225.120.95:8000/test/prompt" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt_name": "model-test", "variables": {"question": "What is cloud computing?"}, "model": "gpt-4.1-mini"}'
+
+# Test gpt-4.1
+curl -X POST "http://64.225.120.95:8000/test/prompt" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt_name": "model-test", "variables": {"question": "What is cloud computing?"}, "model": "gpt-4.1"}'
+
+# Compare in logs
+curl "http://64.225.120.95:8000/logs?limit=2"
+```
+
+### Local Testing (Only When Necessary)
+
+Use local testing only for rapid iteration before deploying:
 
 ```bash
 # Run API locally
 uvicorn api.main:app --reload --port 8000
 
-# Test a prompt (outputs go to tmp/)
-python -c "
-from workers.ai import prompt
-result = prompt('entity-research', {'lead': {...}}, model='gpt-4.1', log=True)
-import json
-with open('tmp/test-output.json', 'w') as f:
-    json.dump(result, f, indent=2)
-"
+# Test via local endpoint
+curl -X POST "http://localhost:8000/test/prompt" ...
 ```
 
 ---

@@ -337,8 +337,30 @@ After implementing:
 - [ ] API endpoint added (if needed)
 - [ ] Added to `template_runners` in `workers/runner.py` (if registry-based)
 - [ ] Registered in Supabase `automations` table (if tracked)
-- [ ] Test run completed
+- [ ] **Deployed and tested via real API** (see Testing Workflow below)
 - [ ] **Verified in `execution_logs` table** (critical!)
+
+## Testing Workflow (MANDATORY)
+
+**ALWAYS test via the real API endpoint**, not local scripts.
+
+```bash
+# 1. Commit and push
+git add -A && git commit -m "Add {automation-name}" && git push
+
+# 2. Deploy (requires SSH - ask user if not available)
+ssh root@64.225.120.95 "cd /opt/automations && git pull && systemctl restart automations-api"
+
+# 3. Test via API
+curl -X POST "http://64.225.120.95:8000/test/prompt" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt_name": "your-prompt", "variables": {...}, "model": "gpt-4.1"}'
+
+# 4. Verify logs
+curl "http://64.225.120.95:8000/logs?limit=1"
+```
+
+See `CLAUDE.md` > Testing Workflow for full details.
 
 ## Logging Requirements (NON-NEGOTIABLE)
 
