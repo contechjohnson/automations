@@ -91,6 +91,7 @@ Before starting, you need:
    - OpenAI API key
    - (Optional) Google AI API key
    - (Optional) Anthropic API key
+   - DigitalOcean Personal Access Token (for API management)
 
 ---
 
@@ -184,6 +185,9 @@ cat > /opt/automations/.env << 'EOF'
 OPENAI_API_KEY=sk-your-key-here
 ANTHROPIC_API_KEY=sk-ant-your-key-here
 GOOGLE_API_KEY=your-google-key-here
+
+# DigitalOcean (for API management - create/destroy droplets programmatically)
+DIGITALOCEAN_TOKEN=dop_v1_your-token-here
 
 # Supabase
 SUPABASE_URL=https://yourproject.supabase.co
@@ -960,6 +964,43 @@ With this infrastructure in place, you can:
 3. **Schedule crons** - Use systemd timers or a cron job scheduler
 4. **Scale up** - Upgrade the droplet if needed ($24/mo for 4GB RAM)
 5. **Add Redis Queue** - For async job processing with RQ
+6. **Programmatic Infrastructure** - Use the DigitalOcean API to spin up/down droplets
+
+### DigitalOcean API Examples
+
+With your DO token, you can manage infrastructure programmatically:
+
+```bash
+# List all droplets
+curl -s -X GET "https://api.digitalocean.com/v2/droplets" \
+  -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" | python3 -m json.tool
+
+# Get droplet details
+curl -s -X GET "https://api.digitalocean.com/v2/droplets/DROPLET_ID" \
+  -H "Authorization: Bearer $DIGITALOCEAN_TOKEN"
+
+# Create a new droplet
+curl -X POST "https://api.digitalocean.com/v2/droplets" \
+  -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "worker-2",
+    "region": "nyc1",
+    "size": "s-1vcpu-2gb",
+    "image": "ubuntu-24-04-x64"
+  }'
+
+# Power off a droplet
+curl -X POST "https://api.digitalocean.com/v2/droplets/DROPLET_ID/actions" \
+  -H "Authorization: Bearer $DIGITALOCEAN_TOKEN" \
+  -d '{"type": "power_off"}'
+
+# Destroy a droplet
+curl -X DELETE "https://api.digitalocean.com/v2/droplets/DROPLET_ID" \
+  -H "Authorization: Bearer $DIGITALOCEAN_TOKEN"
+```
+
+This enables auto-scaling: spin up workers when needed, destroy when done.
 
 ---
 
