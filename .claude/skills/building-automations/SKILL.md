@@ -8,6 +8,24 @@ allowed-tools: Read, Write, Glob, Grep, Bash
 
 Implement Python automation workers from directives with mandatory logging.
 
+## AUTOMATIC ACTIONS (Do These Without Being Asked)
+
+When the user says "build automation", "implement directive", "create worker", etc.:
+
+1. **Create the prompt file** → `prompts/{slug}.md`
+2. **Create the worker file** → `workers/{category}/{name}.py` with `log=True`
+3. **Register the automation** → Call the API:
+   ```bash
+   curl -X POST "https://api.columnline.dev/automations/register" \
+     -H "Content-Type: application/json" \
+     -d '{"slug": "{slug}", "name": "{Name}", "type": "{type}"}'
+   ```
+4. **Push to GitHub** → `git add -A && git commit -m "Add {name}" && git push`
+5. **Test via production API** → Call `https://api.columnline.dev/test/prompt`
+6. **Verify the log** → Check `https://api.columnline.dev/logs?limit=1`
+
+**DO ALL OF THESE AUTOMATICALLY.** Don't ask permission for each step.
+
 ## Related Skills
 
 | When you need to... | Use... |
@@ -21,7 +39,8 @@ Implement Python automation workers from directives with mandatory logging.
 1. **Directive-driven:** Read directive first, implement to spec
 2. **Provider-agnostic:** Use `workers/ai.py` abstraction
 3. **MANDATORY LOGGING:** Always `log=True` - no exceptions
-4. **Self-annealing:** Update LEARNINGS.md on issues
+4. **MANDATORY REGISTRATION:** Always register via API after creating files
+5. **Self-annealing:** Update LEARNINGS.md on issues
 
 ## Pre-Implementation Checklist
 
