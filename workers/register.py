@@ -90,8 +90,11 @@ def register_automation(
         "geography": geography,
         "config": config,
         "tags": tags,
-        "status": status if status != "active" else None,  # Only include if not default
     }
+
+    # Only include status if explicitly set to a non-default value
+    if status is not None and status != "active":
+        optional_fields["status"] = status
 
     for field, value in optional_fields.items():
         if value is not None:

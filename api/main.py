@@ -214,6 +214,8 @@ def register_automation_endpoint(request: AutomationRegister):
     from workers.register import register_automation
 
     try:
+        # Only pass status if explicitly set (not the default)
+        status = request.status if request.status != "active" else None
         result = register_automation(
             slug=request.slug,
             name=request.name,
@@ -222,7 +224,7 @@ def register_automation_endpoint(request: AutomationRegister):
             description=request.description,
             worker_path=request.worker_path,
             tags=request.tags,
-            status=request.status,
+            status=status,
         )
         return result
     except Exception as e:
