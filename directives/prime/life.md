@@ -181,3 +181,17 @@
 **Time**: Not living in constant state of overwhelm. Present with kids. Not missing hours with Milo and Scarlett. Not giving 8 bullshit hours to something I can't get excited about.
 
 **Freedom**: Exit the fiat economy. No boss. Autonomy. Do whatever I want. Prove I'm the great person I thought I'd be.
+
+## Learnings
+
+### 2026-01-06 | Milo said I wasn't watching
+
+**What happened:** At soccer practice, was on phone. Milo told me I wasn't watching him.
+
+**Why it matters:** Five-year-olds don't manipulate — they just tell you what they see. He noticed. That means it's a pattern, not a one-off.
+
+**The fix:** Phone in the car at his activities. Period. Be bored. Watch him miss the ball. That's the job.
+
+**The bigger lesson:** Core memories are forming now. "Dad was at my games" vs "Dad was on his phone at my games" — that's the difference.
+
+**New rule:** Phone stays in car at kids' practices and games. Non-negotiable.
