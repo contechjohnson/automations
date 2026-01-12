@@ -76,6 +76,41 @@ def load_prompt_content(prompt_id: str) -> str:
     raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
 
 
+def strip_json_comments(text: str) -> str:
+    """Strip JavaScript-style comments from JSON text.
+
+    LLMs sometimes include // comments in their JSON output which breaks parsing.
+    This removes single-line // comments while preserving strings that contain //.
+    """
+    # Simple approach: remove lines that are just comments or trailing comments
+    # Be careful not to remove // inside strings
+    lines = text.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        # Check if line has // outside of strings
+        # Simple heuristic: find // and check if it's inside quotes
+        comment_pos = line.find('//')
+        if comment_pos == -1:
+            cleaned_lines.append(line)
+            continue
+
+        # Count quotes before the //
+        before_comment = line[:comment_pos]
+        quote_count = before_comment.count('"') - before_comment.count('\\"')
+
+        if quote_count % 2 == 0:
+            # // is outside quotes, remove it and everything after
+            cleaned = line[:comment_pos].rstrip()
+            # Only keep if there's content or it's preserving structure
+            if cleaned or cleaned_lines:
+                cleaned_lines.append(cleaned)
+        else:
+            # // is inside a string, keep the whole line
+            cleaned_lines.append(line)
+
+    return '\n'.join(cleaned_lines)
+
+
 def parse_json_output(raw_output: str) -> Optional[Dict[str, Any]]:
     """Extract and parse JSON from LLM output"""
     if not raw_output:
@@ -84,30 +119,36 @@ def parse_json_output(raw_output: str) -> Optional[Dict[str, Any]]:
 
     print(f"DEBUG parse_json_output: input length={len(raw_output)}, starts_with='{raw_output[:100]}'")
 
+    # First, strip any JavaScript-style comments that LLMs sometimes include
+    cleaned_output = strip_json_comments(raw_output)
+    if cleaned_output != raw_output:
+        print(f"DEBUG parse_json_output: stripped comments, new length={len(cleaned_output)}")
+
     # Try direct parse first (with strip to remove whitespace)
     try:
-        result = json.loads(raw_output.strip())
+        result = json.loads(cleaned_output.strip())
         print(f"DEBUG parse_json_output: direct parse SUCCESS, keys={list(result.keys()) if isinstance(result, dict) else 'list'}")
         return result
     except json.JSONDecodeError as e:
         print(f"DEBUG parse_json_output: direct parse failed: {e}")
 
-    # Try to find JSON in markdown code blocks
+    # Try to find JSON in markdown code blocks (use cleaned output)
     json_pattern = r'```(?:json)?\s*([\s\S]*?)```'
-    matches = re.findall(json_pattern, raw_output)
+    matches = re.findall(json_pattern, cleaned_output)
     print(f"DEBUG parse_json_output: found {len(matches)} markdown code blocks")
     for i, match in enumerate(matches):
         try:
-            result = json.loads(match.strip())
+            cleaned_match = strip_json_comments(match)
+            result = json.loads(cleaned_match.strip())
             print(f"DEBUG parse_json_output: code block {i} parse SUCCESS")
             return result
         except json.JSONDecodeError as e:
             print(f"DEBUG parse_json_output: code block {i} parse failed: {e}")
             continue
 
-    # Try to find JSON object/array anywhere
+    # Try to find JSON object/array anywhere (use cleaned output)
     for pattern in [r'\{[\s\S]*\}', r'\[[\s\S]*\]']:
-        match = re.search(pattern, raw_output)
+        match = re.search(pattern, cleaned_output)
         if match:
             try:
                 result = json.loads(match.group())
@@ -117,7 +158,7 @@ def parse_json_output(raw_output: str) -> Optional[Dict[str, Any]]:
                 print(f"DEBUG parse_json_output: regex pattern '{pattern[:10]}' failed: {e}")
                 continue
 
-    print(f"DEBUG parse_json_output: ALL methods failed, returning None. Output ends with: '{raw_output[-200:]}'")
+    print(f"DEBUG parse_json_output: ALL methods failed, returning None. Output ends with: '{cleaned_output[-200:]}'")
     return None
 
 
