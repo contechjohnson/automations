@@ -149,6 +149,11 @@ class V2Repository:
         data = run.model_dump(exclude={"id", "created_at"})
         # Convert enum to string
         data["status"] = data["status"].value if isinstance(data["status"], PipelineStatus) else data["status"]
+        # Convert datetime to ISO string
+        if data.get("started_at") and isinstance(data["started_at"], datetime):
+            data["started_at"] = data["started_at"].isoformat()
+        if data.get("completed_at") and isinstance(data["completed_at"], datetime):
+            data["completed_at"] = data["completed_at"].isoformat()
         result = self.client.table("v2_pipeline_runs").insert(data).execute()
         return PipelineRun(**result.data[0])
 
@@ -181,6 +186,11 @@ class V2Repository:
         """Create a new step run"""
         data = step_run.model_dump(exclude={"id", "created_at"})
         data["status"] = data["status"].value if isinstance(data["status"], StepStatus) else data["status"]
+        # Convert datetime to ISO string
+        if data.get("started_at") and isinstance(data["started_at"], datetime):
+            data["started_at"] = data["started_at"].isoformat()
+        if data.get("completed_at") and isinstance(data["completed_at"], datetime):
+            data["completed_at"] = data["completed_at"].isoformat()
         result = self.client.table("v2_step_runs").insert(data).execute()
         return StepRun(**result.data[0])
 
