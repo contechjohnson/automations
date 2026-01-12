@@ -74,6 +74,8 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,  # LLM extracts claims from narrative
         uses_tools=["web_search"],
         timeout_seconds=300,  # 5 min for agent web search
+        produces_context_pack=True,  # Creates lead context for step 3
+        context_pack_type="signal_discovery",  # New pack type
     ),
     "3-entity-research": StepConfig(
         prompt_id="3-entity-research",

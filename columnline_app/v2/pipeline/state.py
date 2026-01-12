@@ -88,6 +88,19 @@ class PipelineState:
         if name == "resolved_contacts":
             return [c.model_dump() for c in self.contacts]
 
+        # context_pack is a special variable that resolves to the most recent context pack
+        if name == "context_pack":
+            # Return the most relevant context pack data
+            # Priority: signal_discovery -> signal_to_entity -> entity_to_contacts
+            for pack_type in ["signal_discovery", "signal_to_entity", "entity_to_contacts"]:
+                if pack_type in self.context_packs:
+                    return self.context_packs[pack_type].pack_data
+            return None
+
+        # domain is an alias for company_domain
+        if name == "domain":
+            return self.get_variable("company_domain")
+
         return None
 
     def add_step_output(self, step: str, output: Any):

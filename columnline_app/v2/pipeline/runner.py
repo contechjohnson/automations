@@ -565,12 +565,27 @@ class PipelineRunner:
         # Handle None output gracefully
         output = latest_output or {}
 
-        if pack_type == "signal_to_entity":
+        if pack_type == "signal_discovery":
+            # Pack from step 2 to step 3 - contains the lead/signal found
+            lead = output.get("lead", {})
             return {
-                "signal": output.get("primary_signal") or state.get_variable("signal_type"),
+                "company_name": lead.get("company_name") or output.get("company_name"),
+                "company_domain": lead.get("company_domain") or output.get("domain"),
+                "primary_signal": lead.get("primary_signal") or output.get("primary_signal"),
+                "initial_assessment": lead.get("initial_assessment", {}),
+                "research_questions": lead.get("next_research_questions", []),
+                "sources": output.get("sources", []),
+            }
+        elif pack_type == "signal_to_entity":
+            # Pack from step 3 (entity research) to step 4 (contact discovery)
+            # Contains company identity, domains, and project details
+            return {
                 "company_name": output.get("company_name") or state.get_variable("company_name"),
-                "domain": output.get("domain") or state.get_variable("company_domain"),
-                "signal_summary": output.get("signal_summary") or state.get_variable("signal_summary"),
+                "company_domain": output.get("domain") or output.get("company_domain") or state.get_variable("company_domain"),
+                "corporate_structure": output.get("corporate_structure"),
+                "partner_organizations": output.get("partner_organizations", []),
+                "project_details": output.get("project_details"),
+                "primary_signal": output.get("primary_signal") or state.get_variable("primary_signal"),
                 "key_facts": output.get("key_facts", []),
             }
         elif pack_type == "entity_to_contacts":
