@@ -12,7 +12,7 @@ from ..config import (
     StepConfig, ExecutionMode
 )
 from ..db.models import (
-    PipelineRun, PipelineStatus, StepStatus,
+    PipelineRun, PipelineStatus, StepStatus, StepRun,
     Dossier, Contact, ContextPack, Claim
 )
 from ..db.repository import V2Repository
@@ -229,8 +229,10 @@ class PipelineRunner:
 
         # Store claims
         if claims:
+            print(f"  Extracted {len(claims)} claims from {step_id}")
             saved_claims = self.repo.create_claims_batch(claims)
             state.add_claims(saved_claims)
+            print(f"  Total claims in state: {len(state.claims)}")
 
         # Create context pack via LLM if applicable
         if step_config.produces_context_pack and step_config.context_pack_type:
@@ -276,51 +278,128 @@ class PipelineRunner:
         pipeline_run_id: str
     ):
         """Execute claims merge at the insight step"""
+        import time
         step_id = step_config.prompt_id
         print(f"Executing claims merge at {step_id}...")
+        print(f"  Claims in state: {len(state.claims)}")
+        print(f"  Steps completed: {state.steps_completed}")
 
-        # Run claims merge LLM
-        merge_result, merged_claims = await self.executor.execute_claims_merge(state)
+        start_time = time.time()
 
-        if merge_result:
-            state.add_step_output(step_id, merge_result)
+        # Create step run record FIRST
+        step_run = self.repo.create_step_run(StepRun(
+            pipeline_run_id=pipeline_run_id,
+            step=step_id,
+            prompt_id=step_id,
+            status=StepStatus.RUNNING,
+            model=step_config.model,
+            started_at=datetime.utcnow(),
+        ))
 
-            # Store merged claims
-            if merged_claims:
-                saved_claims = self.repo.create_claims_batch(merged_claims)
-                state.merged_claims = saved_claims
+        try:
+            # Capture input claims as input_variables for visibility
+            input_claims_preview = [
+                {
+                    "claim_id": c.claim_id,
+                    "claim_type": c.claim_type.value if hasattr(c.claim_type, 'value') else c.claim_type,
+                    "statement": c.statement[:100] + "..." if len(c.statement) > 100 else c.statement,
+                    "source_step": c.source_step,
+                }
+                for c in state.claims[:20]  # Preview first 20
+            ]
+            input_vars = {
+                "company_name": state.get_variable("company_name"),
+                "total_claims_to_merge": len(state.claims),
+                "claims_preview": input_claims_preview,
+                "claims_by_step": self._count_claims_by_step(state.claims),
+            }
 
-            # Store merge stats
-            merge_stats = merge_result.get("merge_stats", {})
-            if merge_stats:
-                self.repo.create_merge_stats(
-                    pipeline_run_id=pipeline_run_id,
-                    input_claims_count=merge_stats.get("input_claims", 0),
-                    output_claims_count=merge_stats.get("output_claims", 0),
-                    duplicates_merged=merge_stats.get("duplicates_merged", 0),
-                    conflicts_resolved=merge_stats.get("conflicts_resolved", 0),
+            self.repo.update_step_run(step_run.id, {
+                "input_variables": input_vars,
+            })
+
+            # Run claims merge LLM
+            merge_result, merged_claims = await self.executor.execute_claims_merge(state)
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if merge_result:
+                state.add_step_output(step_id, merge_result)
+
+                # Store merged claims
+                if merged_claims:
+                    saved_claims = self.repo.create_claims_batch(merged_claims)
+                    state.merged_claims = saved_claims
+
+                # Store merge stats
+                merge_stats = merge_result.get("merge_stats", {})
+                if merge_stats:
+                    self.repo.create_merge_stats(
+                        pipeline_run_id=pipeline_run_id,
+                        input_claims_count=merge_stats.get("input_claims", 0),
+                        output_claims_count=merge_stats.get("output_claims", 0),
+                        duplicates_merged=merge_stats.get("duplicates_merged", 0),
+                        conflicts_resolved=merge_stats.get("conflicts_resolved", 0),
+                    )
+
+                # Update step run with success
+                self.repo.update_step_run(step_run.id, {
+                    "status": StepStatus.COMPLETED.value,
+                    "parsed_output": merge_result,
+                    "duration_ms": duration_ms,
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+
+            else:
+                # No result - still mark completed but note it
+                self.repo.update_step_run(step_run.id, {
+                    "status": StepStatus.COMPLETED.value,
+                    "parsed_output": {"warning": "No claims to merge or merge returned empty"},
+                    "duration_ms": duration_ms,
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+
+            # Generate context pack after merge
+            if step_config.produces_context_pack and step_config.context_pack_type:
+                pack_data = await self.executor.generate_context_pack(
+                    state,
+                    step_config.context_pack_type,
+                    "writers"
                 )
+                if pack_data:
+                    pack = self.repo.create_context_pack(ContextPack(
+                        pipeline_run_id=pipeline_run_id,
+                        step_run_id=step_run.id,
+                        pack_type=step_config.context_pack_type,
+                        pack_data=pack_data,
+                        anchor_claim_ids=pack_data.get("anchor_claim_ids", []),
+                    ))
+                    state.add_context_pack(pack)
 
-        # Generate context pack after merge
-        if step_config.produces_context_pack and step_config.context_pack_type:
-            pack_data = await self.executor.generate_context_pack(
-                state,
-                step_config.context_pack_type,
-                "writers"
-            )
-            if pack_data:
-                pack = self.repo.create_context_pack(ContextPack(
-                    pipeline_run_id=pipeline_run_id,
-                    pack_type=step_config.context_pack_type,
-                    pack_data=pack_data,
-                    anchor_claim_ids=pack_data.get("anchor_claim_ids", []),
-                ))
-                state.add_context_pack(pack)
+            state.steps_completed.append(step_id)
+            self.repo.update_pipeline_run(pipeline_run_id, {
+                "steps_completed": state.steps_completed,
+            })
 
-        state.steps_completed.append(step_id)
-        self.repo.update_pipeline_run(pipeline_run_id, {
-            "steps_completed": state.steps_completed,
-        })
+        except Exception as e:
+            # Record failure
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.repo.update_step_run(step_run.id, {
+                "status": StepStatus.FAILED.value,
+                "error_message": str(e),
+                "error_traceback": traceback.format_exc(),
+                "duration_ms": duration_ms,
+                "completed_at": datetime.utcnow().isoformat(),
+            })
+            raise
+
+    def _count_claims_by_step(self, claims: List[Claim]) -> Dict[str, int]:
+        """Count claims by source step for visibility"""
+        counts = {}
+        for claim in claims:
+            step = claim.source_step or "unknown"
+            counts[step] = counts.get(step, 0) + 1
+        return counts
 
     async def _execute_per_contact_copy(
         self,
