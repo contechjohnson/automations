@@ -73,8 +73,8 @@ class V2Repository:
 
     def get_prompt(self, prompt_id: str) -> Optional[PromptConfig]:
         """Get a prompt by prompt_id"""
-        result = self.client.table("v2_prompts").select("*").eq("prompt_id", prompt_id).single().execute()
-        return PromptConfig(**result.data) if result.data else None
+        result = self.client.table("v2_prompts").select("*").eq("prompt_id", prompt_id).execute()
+        return PromptConfig(**result.data[0]) if result.data else None
 
     def get_prompt_with_content(self, prompt_id: str) -> Optional[PromptConfig]:
         """Get prompt with current version content loaded"""
