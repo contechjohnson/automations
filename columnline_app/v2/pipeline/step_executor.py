@@ -182,6 +182,9 @@ async def run_claims_merge_llm(
     """
     Run the claims merge LLM step at 7b-insight.
     This is the single reconciliation point for all accumulated claims.
+
+    Returns a merge result dict with at minimum "merged_claims" array.
+    If merge fails, returns passthrough of input claims to ensure downstream steps work.
     """
     from workers.ai import ai
 
@@ -199,20 +202,113 @@ async def run_claims_merge_llm(
 
     print(f"Claims merge prompt length: {len(prompt)} chars for {len(all_claims)} claims")
 
-    # Run LLM
-    result = ai(prompt, model=model, temperature=0.3)
+    # Run LLM with retry on parse failure
+    max_retries = 2
+    result = None
+    parsed = None
 
-    print(f"Claims merge raw result length: {len(result) if result else 0} chars")
-    if result:
-        print(f"Claims merge result preview: {result[:500]}...")
+    for attempt in range(max_retries):
+        result = ai(prompt, model=model, temperature=0.3)
 
-    # Parse JSON output
-    parsed = parse_json_output(result)
-    if parsed is None and result:
-        print(f"WARNING: Failed to parse claims merge JSON. Result starts with: {result[:300]}")
-    elif parsed:
-        print(f"Claims merge parsed keys: {list(parsed.keys())}")
-    return parsed
+        print(f"Claims merge attempt {attempt + 1}: raw result length = {len(result) if result else 0} chars")
+        if result:
+            print(f"Claims merge result preview: {result[:500]}...")
+
+        # Parse JSON output
+        parsed = parse_json_output(result)
+
+        if parsed and "merged_claims" in parsed:
+            print(f"Claims merge parsed successfully with keys: {list(parsed.keys())}")
+            return parsed
+        elif parsed:
+            print(f"WARNING: Parsed JSON but missing 'merged_claims' key. Keys: {list(parsed.keys())}")
+            # If we got parsed JSON without merged_claims, might be malformed
+            if attempt < max_retries - 1:
+                print("Retrying claims merge...")
+                continue
+        elif result:
+            print(f"WARNING: Failed to parse claims merge JSON. Result starts with: {result[:300]}")
+            if attempt < max_retries - 1:
+                print("Retrying claims merge...")
+                continue
+
+    # If all retries failed, create passthrough result
+    print(f"Claims merge failed after {max_retries} attempts. Creating passthrough result.")
+    passthrough_result = create_passthrough_merge_result(all_claims)
+    return passthrough_result
+
+
+def create_passthrough_merge_result(all_claims: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Create a passthrough merge result when LLM merge fails.
+    This ensures downstream steps still receive all claims.
+    """
+    # Convert input claims to merged claim format
+    merged_claims = []
+    for i, claim in enumerate(all_claims):
+        merged_claims.append({
+            "merged_claim_id": f"PASS_{i+1:03d}",
+            "original_claim_ids": [claim.get("claim_id", f"unknown_{i}")],
+            "claim_type": claim.get("claim_type", "NOTE"),
+            "statement": claim.get("statement", ""),
+            "entities": claim.get("entities", []),
+            "sources": [{
+                "url": claim.get("source_url"),
+                "name": claim.get("source_name", "Unknown"),
+                "tier": claim.get("source_tier", "OTHER")
+            }],
+            "confidence": claim.get("confidence", "MEDIUM"),
+            "reconciliation_type": "passthrough"
+        })
+
+    # Extract signals from passthrough claims (claims with SIGNAL type)
+    resolved_signals = []
+    for i, claim in enumerate(all_claims):
+        if claim.get("claim_type") == "SIGNAL":
+            resolved_signals.append({
+                "signal_id": f"S_PASS_{i+1:03d}",
+                "signal_type": "UNKNOWN",
+                "description": claim.get("statement", ""),
+                "date": claim.get("date_in_claim"),
+                "strength": "UNKNOWN",
+                "source_tier": claim.get("source_tier", "OTHER"),
+                "evidence_claim_ids": [claim.get("claim_id", f"unknown_{i}")],
+                "why_early": "Unprocessed - passthrough mode"
+            })
+
+    # Extract contacts from passthrough claims (claims with CONTACT type)
+    resolved_contacts = []
+    for i, claim in enumerate(all_claims):
+        if claim.get("claim_type") == "CONTACT":
+            entities = claim.get("entities", [])
+            resolved_contacts.append({
+                "contact_id": f"C_PASS_{i+1:03d}",
+                "full_name": entities[0] if entities else "Unknown",
+                "title": "",
+                "organization": entities[1] if len(entities) > 1 else "",
+                "evidence_claim_ids": [claim.get("claim_id", f"unknown_{i}")],
+                "confidence": claim.get("confidence", "MEDIUM")
+            })
+
+    return {
+        "merged_claims": merged_claims,
+        "resolved_contacts": resolved_contacts,
+        "resolved_signals": resolved_signals,
+        "timeline": [],
+        "conflicts_resolved": [],
+        "needs_verification": [],
+        "merge_stats": {
+            "input_claims": len(all_claims),
+            "output_claims": len(merged_claims),
+            "duplicates_merged": 0,
+            "conflicts_resolved": 0,
+            "contacts_identified": len(resolved_contacts),
+            "signals_identified": len(resolved_signals),
+            "timeline_events": 0,
+            "passthrough": True,
+            "reason": "LLM merge failed - claims passed through unmerged"
+        }
+    }
 
 
 async def run_context_pack_llm(
