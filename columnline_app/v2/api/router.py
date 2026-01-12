@@ -92,9 +92,15 @@ async def create_prompt(request: CreatePromptRequest):
                 content = f"# {request.name}\n\nPrompt content here..."
 
         # Insert into v2_prompts table
+        # Get stage from config if available
+        from ..config import PIPELINE_STEPS
+        step_config = PIPELINE_STEPS.get(request.prompt_id)
+        stage = step_config.stage.value if step_config else "FINAL"
+
         prompt_data = {
             "prompt_id": request.prompt_id,
             "name": request.name,
+            "stage": stage,
             "current_version": 1,
             "is_active": True,
         }
