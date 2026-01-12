@@ -256,22 +256,29 @@ class StepExecutor:
         prompt: str,
         config: StepConfig
     ) -> Tuple[str, int, int]:
-        """Execute agent with tools"""
-        from workers.agent import run_firecrawl_agent, run_research_agent, run_full_agent
+        """Execute agent with tools - falls back to sync call if agents SDK unavailable"""
+        try:
+            from workers.agent import run_firecrawl_agent, run_research_agent, run_full_agent
 
-        # Choose agent based on tools
-        tools = config.uses_tools or []
+            # Choose agent based on tools
+            tools = config.uses_tools or []
 
-        if "firecrawl_scrape" in tools or "firecrawl_search" in tools:
-            if "web_search" in tools:
-                result = run_full_agent(prompt, model=config.model)
+            if "firecrawl_scrape" in tools or "firecrawl_search" in tools:
+                if "web_search" in tools:
+                    result = run_full_agent(prompt, model=config.model)
+                else:
+                    result = run_firecrawl_agent(prompt, model=config.model)
             else:
-                result = run_firecrawl_agent(prompt, model=config.model)
-        else:
-            result = run_research_agent(prompt, model=config.model)
+                result = run_research_agent(prompt, model=config.model)
 
-        # Agents return the final output
-        output = result.get("output", result) if isinstance(result, dict) else str(result)
+            # Agents return the final output
+            output = result.get("output", result) if isinstance(result, dict) else str(result)
+
+        except ImportError as e:
+            # Fall back to regular LLM call if agents SDK not available
+            print(f"Warning: Agent SDK not available ({e}), falling back to sync call")
+            from workers.ai import ai
+            output = ai(prompt, model=config.model, temperature=0.7)
 
         tokens_in = len(prompt.split()) * 1.3
         tokens_out = len(output.split()) * 1.3
