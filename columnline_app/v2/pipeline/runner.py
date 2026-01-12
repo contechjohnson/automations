@@ -234,23 +234,32 @@ class PipelineRunner:
             state.add_claims(saved_claims)
             print(f"  Total claims in state: {len(state.claims)}")
 
-        # Create context pack via LLM if applicable
+        # Create context pack if applicable
         if step_config.produces_context_pack and step_config.context_pack_type:
-            # Use LLM-generated context pack
-            pack_data = await self.executor.generate_context_pack(
-                state,
-                step_config.context_pack_type,
-                self._get_next_step(step_id)
-            )
+            pack_type = step_config.context_pack_type
+
+            # For signal_discovery pack, extract directly from step output (no LLM needed)
+            if pack_type == "signal_discovery":
+                pack_data = self._build_context_pack(pack_type, state, parsed)
+                print(f"Built signal_discovery pack: {list(pack_data.keys()) if pack_data else 'None'}")
+            else:
+                # Use LLM-generated context pack for other types
+                pack_data = await self.executor.generate_context_pack(
+                    state,
+                    pack_type,
+                    self._get_next_step(step_id)
+                )
+
             if pack_data:
                 pack = self.repo.create_context_pack(ContextPack(
                     pipeline_run_id=pipeline_run_id,
                     step_run_id=step_run.id,
-                    pack_type=step_config.context_pack_type,
+                    pack_type=pack_type,
                     pack_data=pack_data,
-                    anchor_claim_ids=pack_data.get("anchor_claim_ids", []),
+                    anchor_claim_ids=pack_data.get("anchor_claim_ids", []) if isinstance(pack_data, dict) else [],
                 ))
                 state.add_context_pack(pack)
+                print(f"Added context pack '{pack_type}' to state")
 
         # Mark step completed
         state.steps_completed.append(step_id)
