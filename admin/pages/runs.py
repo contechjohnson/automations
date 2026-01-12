@@ -68,6 +68,23 @@ def start_pipeline(client_id: str, company_name: str, hint: str = ""):
     return None
 
 
+def rerun_step(run_id: str, step_id: str, overrides: dict = None):
+    """Re-run a step with stored input (or overrides)"""
+    try:
+        with httpx.Client(timeout=120.0) as client:  # Longer timeout for re-runs
+            response = client.post(
+                f"{API_URL}/v2/pipeline/runs/{run_id}/steps/{step_id}/rerun",
+                json={"variable_overrides": overrides or {}}
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                st.error(f"Failed to rerun step: {response.text}")
+    except Exception as e:
+        st.error(f"Error rerunning step: {e}")
+    return None
+
+
 def format_time_ago(timestamp_str: str) -> str:
     """Format timestamp as 'X ago'"""
     if not timestamp_str:
@@ -201,10 +218,10 @@ def render_run_detail(run_detail: dict):
 
             # Show I/O if expanded
             if st.session_state.get(f"show_io_{step['id']}"):
-                render_step_io(step)
+                render_step_io(step, run.get("id"))
 
 
-def render_step_io(step: dict):
+def render_step_io(step: dict, run_id: str = None):
     """Render step input/output"""
     step_name = step.get('step', 'unknown')
     st.markdown(f"#### {step_name} I/O")
@@ -298,7 +315,16 @@ def render_step_io(step: dict):
             with st.expander("Full Traceback"):
                 st.code(step["error_traceback"])
 
-    # Close button
-    if st.button("Close", key=f"close_{step['id']}"):
-        st.session_state[f"show_io_{step['id']}"] = False
-        st.rerun()
+    # Action buttons
+    col_actions1, col_actions2, col_actions3 = st.columns([1, 1, 2])
+    with col_actions1:
+        if st.button("Close", key=f"close_{step['id']}"):
+            st.session_state[f"show_io_{step['id']}"] = False
+            st.rerun()
+    with col_actions2:
+        if run_id and st.button("Re-run Step", key=f"rerun_{step['id']}"):
+            with st.spinner("Re-running step..."):
+                result = rerun_step(run_id, step_name)
+                if result:
+                    st.success(f"Step re-run completed in {result.get('duration_ms', 0)/1000:.1f}s")
+                    st.rerun()
