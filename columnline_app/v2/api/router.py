@@ -385,6 +385,54 @@ async def get_step_run(run_id: str, step_id: str):
     return step.model_dump()
 
 
+class RerunStepRequest(BaseModel):
+    """Request to re-run a step with optional variable overrides"""
+    variable_overrides: Dict[str, Any] = {}
+
+
+@router.post("/pipeline/runs/{run_id}/steps/{step_id}/rerun")
+async def rerun_step(run_id: str, step_id: str, request: RerunStepRequest):
+    """
+    Re-run a specific step with its stored input (or with overrides).
+    Creates a new step_run record with fresh execution.
+    """
+    repo = get_repo()
+
+    # Get the original step run
+    original_step = repo.get_step_run_by_step(run_id, step_id)
+    if not original_step:
+        raise HTTPException(status_code=404, detail="Step run not found")
+
+    # Get the pipeline run
+    pipeline_run = repo.get_pipeline_run(run_id)
+    if not pipeline_run:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+
+    # Get input variables from original step
+    input_vars = original_step.input_variables or {}
+
+    # Merge with overrides
+    final_vars = {**input_vars, **request.variable_overrides}
+
+    try:
+        runner = PipelineRunner(repo)
+        result = await runner.run_single_step(
+            run_id,
+            step_id,
+            final_vars
+        )
+        return {
+            "status": "completed",
+            "step_run_id": result.get("step_run_id"),
+            "output": result.get("output"),
+            "claims_count": result.get("claims_count", 0),
+            "duration_ms": result.get("duration_ms"),
+        }
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------- Claims ----------
 
 @router.get("/claims/runs/{run_id}")
