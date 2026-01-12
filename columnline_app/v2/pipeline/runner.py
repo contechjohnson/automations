@@ -240,7 +240,7 @@ class PipelineRunner:
 
             # For signal_discovery pack, extract directly from step output (no LLM needed)
             if pack_type == "signal_discovery":
-                pack_data = self._build_context_pack(pack_type, state, parsed)
+                pack_data = self._build_context_pack(pack_type, state, output)
                 print(f"Built signal_discovery pack: {list(pack_data.keys()) if pack_data else 'None'}")
             else:
                 # Use LLM-generated context pack for other types
