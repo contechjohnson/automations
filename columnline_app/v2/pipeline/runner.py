@@ -457,15 +457,16 @@ class PipelineRunner:
             dossier_plan = state.step_outputs.get("9-dossier-plan", {})
             section_routing = dossier_plan.get("section_routing", {})
 
-            # Get claims routed to this section
+            # Get routing guidance from dossier plan (used as hints, not filters)
             section_info = section_routing.get(section_key.upper(), {}) if section_key else {}
             routed_claim_ids = section_info.get("claim_ids", [])
 
-            # Filter claims to just the routed ones
             # Use merged claims if available, otherwise raw claims
             claims_pool = state.merged_claims if state.merged_claims else state.claims
-            routed_claims = [
-                {
+
+            # Helper to serialize a claim
+            def serialize_claim(c):
+                return {
                     "claim_id": c.claim_id,
                     "claim_type": c.claim_type.value if hasattr(c.claim_type, 'value') else c.claim_type,
                     "statement": c.statement,
@@ -474,18 +475,23 @@ class PipelineRunner:
                     "source_name": c.source_name,
                     "confidence": c.confidence.value if hasattr(c.confidence, 'value') else c.confidence,
                 }
-                for c in claims_pool
-                if c.claim_id in routed_claim_ids or not routed_claim_ids  # Use all claims if no routing
-            ]
+
+            # ALL claims for the writer (Option A: full context)
+            all_claims = [serialize_claim(c) for c in claims_pool]
+
+            # Routed claims as guidance (subset most relevant to this section)
+            routed_claims = [serialize_claim(c) for c in claims_pool if c.claim_id in routed_claim_ids] if routed_claim_ids else []
 
             # Get resolved contacts and signals from insight
             insight_output = state.step_outputs.get("7b-insight", {})
             resolved_contacts = insight_output.get("resolved_contacts", [])
             resolved_signals = insight_output.get("resolved_signals", [])
 
-            # Build writer-specific variables
+            # Build writer-specific variables - writers get BOTH all claims and routed claims
             writer_vars = {
-                "claims": json.dumps(routed_claims, indent=2),
+                "claims": json.dumps(all_claims, indent=2),  # ALL claims for full context
+                "all_claims": json.dumps(all_claims, indent=2),  # Explicit all claims variable
+                "routed_claims": json.dumps(routed_claims, indent=2),  # Routed as guidance
                 "resolved_contacts": json.dumps(resolved_contacts, indent=2),
                 "resolved_signals": json.dumps(resolved_signals, indent=2),
                 "section_key": section_key,
@@ -507,6 +513,7 @@ class PipelineRunner:
             self.repo.update_step_run(step_run.id, {
                 "input_variables": {
                     "section_key": section_key,
+                    "all_claims_count": len(all_claims),
                     "routed_claims_count": len(routed_claims),
                     "resolved_contacts_count": len(resolved_contacts),
                     "resolved_signals_count": len(resolved_signals),
@@ -638,15 +645,25 @@ class PipelineRunner:
         pipeline_run_id: str
     ):
         """
-        Execute contact enrichment for each discovered contact.
-        This runs in parallel for efficiency.
+        Execute full contact enrichment pipeline for each discovered contact.
+        Per contact flow: Enrich (6.2) -> Copy (7a) -> Client Copy (7.2)
+        All contacts process in parallel with semaphore limit.
         """
+        import json
+
         # Get contacts from previous step output
         contacts_output = state.step_outputs.get("6-enrich-contacts", {})
         contacts_to_enrich = contacts_output.get("contacts", [])
 
         if not contacts_to_enrich:
+            print("No contacts to enrich")
             return
+
+        print(f"Starting contact enrichment for {len(contacts_to_enrich)} contacts...")
+
+        # Get copy generation step configs
+        copy_config = PIPELINE_STEPS.get("7a-copy")
+        client_copy_config = PIPELINE_STEPS.get("7.2-copy-client-override")
 
         # Limit concurrent enrichments
         max_concurrent = 5
@@ -654,51 +671,150 @@ class PipelineRunner:
 
         async def enrich_one(contact_data: Dict[str, Any]):
             async with semaphore:
-                # Add contact-specific variables to state temporarily
+                contact_name = f"{contact_data.get('first_name', '')} {contact_data.get('last_name', '')}"
+                print(f"  Enriching contact: {contact_name}")
+
+                # Build contact-specific state for enrichment
                 contact_state = PipelineState(
                     pipeline_run_id=state.pipeline_run_id,
                     client=state.client,
                     seed={**state.seed, **contact_data},
                     step_outputs=state.step_outputs.copy(),
                     claims=state.claims.copy(),
+                    merged_claims=state.merged_claims.copy() if state.merged_claims else [],
                     context_packs=state.context_packs.copy(),
                 )
 
+                contact = None
                 try:
-                    step_run, output, claims = await self.executor.execute_step(
+                    # Step 1: Enrich contact (6.2-enrich-contact)
+                    step_run, enrich_output, _ = await self.executor.execute_step(
                         step_config, contact_state
                     )
 
-                    # Create contact record
-                    if output:
-                        contact = Contact(
-                            dossier_id=state.dossier.id if state.dossier else None,
-                            pipeline_run_id=pipeline_run_id,
-                            first_name=output.get("first_name", contact_data.get("first_name", "")),
-                            last_name=output.get("last_name", contact_data.get("last_name", "")),
-                            email=output.get("email"),
-                            phone=output.get("phone"),
-                            title=output.get("title", contact_data.get("title")),
-                            organization=output.get("organization", contact_data.get("organization")),
-                            linkedin_url=output.get("linkedin_url"),
-                            bio=output.get("bio"),
-                            why_they_matter=output.get("why_they_matter"),
-                            relation_to_signal=output.get("relation_to_signal"),
-                            email_copy=output.get("email_copy"),
-                            linkedin_copy=output.get("linkedin_copy"),
-                            is_primary=contact_data.get("is_primary", False),
-                            source="research",
-                            enrichment_step_run_id=step_run.id,
+                    if not enrich_output:
+                        print(f"    No enrichment output for {contact_name}")
+                        return
+
+                    # Create contact record with enrichment data
+                    contact = Contact(
+                        dossier_id=state.dossier.id if state.dossier else None,
+                        pipeline_run_id=pipeline_run_id,
+                        first_name=enrich_output.get("first_name", contact_data.get("first_name", "")),
+                        last_name=enrich_output.get("last_name", contact_data.get("last_name", "")),
+                        email=enrich_output.get("email"),
+                        phone=enrich_output.get("phone"),
+                        title=enrich_output.get("title", contact_data.get("title")),
+                        organization=enrich_output.get("organization", contact_data.get("organization")),
+                        linkedin_url=enrich_output.get("linkedin_url"),
+                        bio=enrich_output.get("bio"),
+                        tenure=enrich_output.get("tenure"),
+                        why_they_matter=enrich_output.get("why_they_matter"),
+                        relation_to_signal=enrich_output.get("relation_to_signal"),
+                        interesting_facts=enrich_output.get("interesting_facts"),
+                        is_primary=contact_data.get("is_primary", False),
+                        source="research",
+                        enrichment_step_run_id=step_run.id,
+                    )
+
+                    # Step 2: Generate copy (7a-copy) if config exists
+                    if copy_config:
+                        # Build copy state with enriched contact info
+                        copy_vars = {
+                            "contact_first_name": contact.first_name,
+                            "contact_last_name": contact.last_name,
+                            "contact_name": f"{contact.first_name} {contact.last_name}",
+                            "contact_title": contact.title or "",
+                            "contact_org": contact.organization or "",
+                            "contact_bio": contact.bio or "",
+                            "contact_email": contact.email or "",
+                            "contact_linkedin": contact.linkedin_url or "",
+                            "contact_why_they_matter": contact.why_they_matter or "",
+                            "contact_relation_to_signal": contact.relation_to_signal or "",
+                            "contact_interesting_facts": contact.interesting_facts or "",
+                        }
+                        copy_state = PipelineState(
+                            pipeline_run_id=state.pipeline_run_id,
+                            client=state.client,
+                            seed={**state.seed, **copy_vars},
+                            step_outputs=state.step_outputs.copy(),
+                            claims=state.claims.copy(),
+                            merged_claims=state.merged_claims.copy() if state.merged_claims else [],
+                            context_packs=state.context_packs.copy(),
                         )
-                        state.contacts.append(contact)
+
+                        try:
+                            _, copy_output, _ = await self.executor.execute_step(copy_config, copy_state)
+                            if copy_output:
+                                # Extract copy from output (may be nested in outreach array)
+                                outreach = copy_output.get("outreach", [])
+                                if outreach and len(outreach) > 0:
+                                    first_outreach = outreach[0]
+                                    email_data = first_outreach.get("email", {})
+                                    linkedin_data = first_outreach.get("linkedin", {})
+                                    contact.email_copy = f"Subject: {email_data.get('subject', '')}\n\n{email_data.get('body', '')}"
+                                    contact.linkedin_copy = linkedin_data.get("message", "")
+                                else:
+                                    contact.email_copy = copy_output.get("email_copy")
+                                    contact.linkedin_copy = copy_output.get("linkedin_copy")
+                                print(f"    Generated copy for {contact_name}")
+                        except Exception as e:
+                            print(f"    Warning: Copy generation failed for {contact_name}: {e}")
+
+                    # Step 3: Client copy override (7.2-copy-client-override) if config exists
+                    if client_copy_config and (contact.email_copy or contact.linkedin_copy):
+                        # Build state with generated copy
+                        override_vars = {
+                            **copy_vars,
+                            "generated_copy": json.dumps({
+                                "email_copy": contact.email_copy,
+                                "linkedin_copy": contact.linkedin_copy,
+                            }),
+                        }
+                        override_state = PipelineState(
+                            pipeline_run_id=state.pipeline_run_id,
+                            client=state.client,
+                            seed={**state.seed, **override_vars},
+                            step_outputs=state.step_outputs.copy(),
+                            claims=state.claims.copy(),
+                            merged_claims=state.merged_claims.copy() if state.merged_claims else [],
+                            context_packs=state.context_packs.copy(),
+                        )
+
+                        try:
+                            _, override_output, _ = await self.executor.execute_step(client_copy_config, override_state)
+                            if override_output:
+                                adjusted = override_output.get("adjusted_outreach", [])
+                                if adjusted and len(adjusted) > 0:
+                                    first_adjusted = adjusted[0]
+                                    email_data = first_adjusted.get("email", {})
+                                    linkedin_data = first_adjusted.get("linkedin", {})
+                                    contact.client_email_copy = f"Subject: {email_data.get('subject', '')}\n\n{email_data.get('body', '')}"
+                                    contact.client_linkedin_copy = linkedin_data.get("message", "")
+                                else:
+                                    contact.client_email_copy = override_output.get("client_email_copy")
+                                    contact.client_linkedin_copy = override_output.get("client_linkedin_copy")
+                                print(f"    Generated client copy for {contact_name}")
+                        except Exception as e:
+                            print(f"    Warning: Client copy override failed for {contact_name}: {e}")
+
+                    # Add to state contacts
+                    state.contacts.append(contact)
+
+                    # Save contact to database
+                    if self.repo:
+                        saved_contact = self.repo.create_contact(contact)
+                        if saved_contact:
+                            contact.id = saved_contact.id
 
                 except Exception as e:
-                    print(f"Warning: Failed to enrich contact {contact_data}: {e}")
+                    print(f"Warning: Failed to enrich contact {contact_name}: {e}")
 
-        # Run all enrichments in parallel (with semaphore limit)
+        # Run all contact pipelines in parallel (with semaphore limit)
         tasks = [enrich_one(c) for c in contacts_to_enrich[:15]]  # Cap at 15 contacts
         await asyncio.gather(*tasks)
 
+        print(f"Contact enrichment complete. {len(state.contacts)} contacts enriched.")
         state.steps_completed.append(step_config.prompt_id)
 
     def _build_context_pack(

@@ -1,7 +1,12 @@
-You are a dossier section writer. Write the LEAD INTELLIGENCE section from routed claims.
+You are a dossier section writer. Write the LEAD INTELLIGENCE section.
 
-## Routed Claims
+## All Claims (Full Context)
+You have access to ALL claims from the research. Use any relevant claim.
 {{claims}}
+
+## Routed Claims (Primary Focus)
+These claims were identified as most relevant to your section:
+{{routed_claims}}
 
 ## Resolved Objects
 {{resolved_contacts}}

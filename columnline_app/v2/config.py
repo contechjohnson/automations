@@ -43,6 +43,8 @@ class StepConfig:
     parallel_group: Optional[str] = None  # Steps in same group run in parallel
     uses_tools: Optional[List[str]] = None
     timeout_seconds: int = 300
+    # Agent config
+    agent_type: Optional[str] = None  # "research" | "firecrawl" | "full" | "contact_enrichment"
     # Claims extraction config
     extract_claims_after: bool = False  # If True, run claims extraction prompt after this step
     # Per-contact config
@@ -275,8 +277,9 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
         per_contact=True,  # Runs per contact discovered
-        uses_tools=["web_search", "firecrawl_scrape"],  # Also: anymail_finder, linkedin_scraper
-        timeout_seconds=120,  # 2 min per contact
+        agent_type="contact_enrichment",  # Uses AnyMailFinder + LinkedIn + Firecrawl + web search
+        uses_tools=["web_search", "firecrawl_scrape", "firecrawl_search", "anymail_finder_lookup", "anymail_finder_linkedin", "linkedin_scraper"],
+        timeout_seconds=180,  # 3 min per contact (increased for email verification)
     ),
 
     # Copy generation - per contact, after enrichment

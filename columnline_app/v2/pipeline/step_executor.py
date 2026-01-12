@@ -520,16 +520,20 @@ class StepExecutor:
         try:
             from workers.agent import run_agent_async
 
-            # Choose agent type based on tools
-            tools = config.uses_tools or []
-
-            if "firecrawl_scrape" in tools or "firecrawl_search" in tools:
-                if "web_search" in tools:
-                    agent_type = "full"
-                else:
-                    agent_type = "firecrawl"
+            # Use agent_type from config if specified, otherwise infer from tools
+            if config.agent_type:
+                agent_type = config.agent_type
             else:
-                agent_type = "research"
+                # Fallback: choose agent type based on tools
+                tools = config.uses_tools or []
+
+                if "firecrawl_scrape" in tools or "firecrawl_search" in tools:
+                    if "web_search" in tools:
+                        agent_type = "full"
+                    else:
+                        agent_type = "firecrawl"
+                else:
+                    agent_type = "research"
 
             # Use async agent function directly (avoids asyncio.run conflict)
             # Pass timeout from config (default 300s = 5 min)

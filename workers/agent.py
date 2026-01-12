@@ -32,6 +32,8 @@ from agents import Agent, Runner, function_tool, WebSearchTool
 # Configuration
 FIRECRAWL_API_KEY = os.environ.get("FIRECRAWL_API_KEY")
 FIRECRAWL_BASE_URL = "https://api.firecrawl.dev/v1"
+ANYMAILFINDER_API_KEY = os.environ.get("ANYMAILFINDER_API_KEY")
+APIFY_API_KEY = os.environ.get("APIFY_API_KEY")
 
 
 # ============================================================================
@@ -181,6 +183,177 @@ def firecrawl_map(url: str, limit: int = 100) -> str:
 
 
 # ============================================================================
+# AnyMailFinder Tools
+# ============================================================================
+
+@function_tool
+def anymail_finder_lookup(full_name: str, domain: str) -> str:
+    """
+    Find and verify email address for a person at a company using AnyMailFinder.
+
+    Args:
+        full_name: Full name of the person (e.g., "John Smith")
+        domain: Company domain (e.g., "acmecorp.com")
+
+    Returns:
+        JSON with email, status, and confidence. Only returns SMTP-verified emails.
+    """
+    if not ANYMAILFINDER_API_KEY:
+        return json.dumps({"error": "ANYMAILFINDER_API_KEY not configured"})
+
+    try:
+        with httpx.Client(timeout=180.0) as client:  # Long timeout for SMTP verification
+            response = client.post(
+                "https://api.anymailfinder.com/v5.1/find-email/person",
+                headers={
+                    "Authorization": ANYMAILFINDER_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "full_name": full_name,
+                    "domain": domain,
+                },
+            )
+
+            if response.status_code == 401:
+                return json.dumps({"error": "Invalid API key"})
+            elif response.status_code == 402:
+                return json.dumps({"error": "Insufficient credits"})
+            elif response.status_code != 200:
+                return json.dumps({"error": f"API error: {response.status_code}"})
+
+            data = response.json()
+            return json.dumps({
+                "email": data.get("valid_email"),  # Only verified emails
+                "raw_email": data.get("email"),  # May include unverified
+                "status": data.get("email_status"),  # valid, risky, not_found
+                "source": "anymailfinder",
+                "full_name": full_name,
+                "domain": domain,
+            })
+    except Exception as e:
+        return json.dumps({"error": f"Failed to lookup email: {str(e)}"})
+
+
+@function_tool
+def anymail_finder_linkedin(linkedin_url: str) -> str:
+    """
+    Find email address from a LinkedIn profile URL using AnyMailFinder.
+
+    Args:
+        linkedin_url: LinkedIn profile URL (e.g., "https://www.linkedin.com/in/johnsmith")
+
+    Returns:
+        JSON with email, status, and confidence. Only returns SMTP-verified emails.
+    """
+    if not ANYMAILFINDER_API_KEY:
+        return json.dumps({"error": "ANYMAILFINDER_API_KEY not configured"})
+
+    try:
+        with httpx.Client(timeout=180.0) as client:
+            response = client.post(
+                "https://api.anymailfinder.com/v5.1/find-email/linkedin",
+                headers={
+                    "Authorization": ANYMAILFINDER_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={"linkedin_url": linkedin_url},
+            )
+
+            if response.status_code != 200:
+                return json.dumps({"error": f"API error: {response.status_code}"})
+
+            data = response.json()
+            return json.dumps({
+                "email": data.get("valid_email"),
+                "status": data.get("email_status"),
+                "source": "anymailfinder_linkedin",
+                "linkedin_url": linkedin_url,
+            })
+    except Exception as e:
+        return json.dumps({"error": f"Failed to lookup email: {str(e)}"})
+
+
+# ============================================================================
+# Apify LinkedIn Scraper Tools
+# ============================================================================
+
+@function_tool
+def linkedin_scraper(linkedin_url: str) -> str:
+    """
+    Scrape a LinkedIn profile to get detailed information including work history,
+    skills, education, and potentially email/phone.
+
+    Args:
+        linkedin_url: LinkedIn profile URL (e.g., "https://www.linkedin.com/in/johnsmith")
+
+    Returns:
+        JSON with profile data including name, title, company, bio, experiences, skills.
+    """
+    if not APIFY_API_KEY:
+        return json.dumps({"error": "APIFY_API_KEY not configured"})
+
+    try:
+        from apify_client import ApifyClient
+
+        client = ApifyClient(APIFY_API_KEY)
+
+        run_input = {
+            "profileUrls": [linkedin_url]
+        }
+
+        # Run the actor and wait for completion (5 min timeout)
+        run = client.actor("dev_fusion/linkedin-profile-scraper").call(
+            run_input=run_input,
+            timeout_secs=300
+        )
+
+        if run.get("status") == "FAILED":
+            return json.dumps({"error": f"Actor failed: {run.get('statusMessage')}"})
+
+        # Get results
+        results = []
+        for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+            results.append(item)
+
+        if not results:
+            return json.dumps({"error": "No profile data returned"})
+
+        # Return first result (we only queried one URL)
+        profile = results[0]
+
+        # Extract key fields
+        return json.dumps({
+            "linkedin_url": profile.get("linkedinUrl", linkedin_url),
+            "full_name": profile.get("fullName"),
+            "first_name": profile.get("firstName"),
+            "last_name": profile.get("lastName"),
+            "headline": profile.get("headline"),
+            "email": profile.get("email"),
+            "phone": profile.get("mobileNumber"),
+            "title": profile.get("jobTitle"),
+            "company": profile.get("companyName"),
+            "company_website": profile.get("companyWebsite"),
+            "company_industry": profile.get("companyIndustry"),
+            "company_size": profile.get("companySize"),
+            "location": profile.get("jobLocation"),
+            "job_started": profile.get("jobStartedOn"),
+            "job_duration": profile.get("currentJobDuration"),
+            "connections": profile.get("connections"),
+            "followers": profile.get("followers"),
+            "experiences": profile.get("experiences", [])[:5],  # Limit to last 5 jobs
+            "educations": profile.get("educations", [])[:3],  # Limit to 3 schools
+            "skills": profile.get("skills", [])[:10],  # Limit to top 10 skills
+            "source": "apify_linkedin",
+        })
+
+    except ImportError:
+        return json.dumps({"error": "apify-client not installed. Run: pip install apify-client"})
+    except Exception as e:
+        return json.dumps({"error": f"LinkedIn scrape failed: {str(e)}"})
+
+
+# ============================================================================
 # Agent Factories
 # ============================================================================
 
@@ -277,6 +450,68 @@ Always include URLs for verification."""
     )
 
 
+def create_contact_enrichment_agent(
+    model: str = "gpt-4.1",
+    instructions: Optional[str] = None,
+) -> Agent:
+    """
+    Create an agent specialized for contact enrichment with access to:
+    - Web search for general research
+    - Firecrawl for scraping company/personal pages
+    - AnyMailFinder for verified email lookup
+    - LinkedIn scraper for profile data
+
+    Best for enriching contact records with emails, bios, work history.
+    """
+    default_instructions = """You are a contact enrichment specialist. Your job is to find
+and verify information about business contacts.
+
+**Available Tools:**
+
+**Web Search & Scraping:**
+- web_search: Quick search for public information
+- firecrawl_scrape(url): Get content from a specific page
+- firecrawl_search(query): Search and scrape results
+
+**Email Lookup (SMTP verified):**
+- anymail_finder_lookup(full_name, domain): Find email by name + company domain
+- anymail_finder_linkedin(linkedin_url): Find email from LinkedIn profile URL
+
+**LinkedIn Profile Data:**
+- linkedin_scraper(linkedin_url): Get full profile with work history, skills, education
+
+**Strategy for enriching a contact:**
+1. If you have a LinkedIn URL, use linkedin_scraper first (gets most data)
+2. If LinkedIn didn't find email, use anymail_finder_linkedin
+3. As fallback, use anymail_finder_lookup with name + company domain
+4. Use firecrawl_scrape on company pages for additional context
+5. Use web_search for news, press releases, conference appearances
+
+**Output Requirements:**
+Return structured data with:
+- email (SMTP verified only)
+- title, company, bio
+- why_they_matter (relevance to the opportunity)
+- interesting_facts (for personalized outreach)
+- linkedin_url, phone (if found)
+
+Always prioritize verified data over guesses."""
+
+    return Agent(
+        name="Contact Enrichment Agent",
+        model=model,
+        instructions=instructions or default_instructions,
+        tools=[
+            WebSearchTool(),
+            firecrawl_scrape,
+            firecrawl_search,
+            anymail_finder_lookup,
+            anymail_finder_linkedin,
+            linkedin_scraper,
+        ],
+    )
+
+
 # ============================================================================
 # Runner Functions (Async)
 # ============================================================================
@@ -293,7 +528,7 @@ async def run_agent_async(
 
     Args:
         input_text: The task/question for the agent
-        agent_type: "research" | "firecrawl" | "full"
+        agent_type: "research" | "firecrawl" | "full" | "contact_enrichment"
         model: Model to use (gpt-4.1, gpt-5.2, etc.)
         instructions: Optional custom instructions
         timeout_seconds: Maximum time to wait (default 5 minutes)
@@ -305,6 +540,8 @@ async def run_agent_async(
         agent = create_firecrawl_agent(model=model, instructions=instructions)
     elif agent_type == "full":
         agent = create_full_agent(model=model, instructions=instructions)
+    elif agent_type == "contact_enrichment":
+        agent = create_contact_enrichment_agent(model=model, instructions=instructions)
     else:
         agent = create_research_agent(model=model, instructions=instructions)
 
@@ -372,6 +609,24 @@ def run_full_agent(
         print(result["output"])
     """
     return asyncio.run(run_agent_async(input_text, "full", model, instructions))
+
+
+def run_contact_enrichment_agent(
+    input_text: str,
+    model: str = "gpt-4.1",
+    instructions: Optional[str] = None,
+) -> dict:
+    """
+    Run contact enrichment agent with web search, Firecrawl, AnyMailFinder, and LinkedIn scraper.
+    Specialized for finding verified emails and enriching contact profiles.
+
+    Usage:
+        result = run_contact_enrichment_agent(
+            "Enrich contact: John Smith, VP Sales at TechCorp (linkedin.com/in/johnsmith)"
+        )
+        print(result["output"])
+    """
+    return asyncio.run(run_agent_async(input_text, "contact_enrichment", model, instructions))
 
 
 # ============================================================================
