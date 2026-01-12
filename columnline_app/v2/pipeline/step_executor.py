@@ -192,7 +192,7 @@ async def run_claims_merge_llm(
     variables = {
         "company_name": company_name,
         "pipeline_run_id": pipeline_run_id,
-        "all_claims": json.dumps(all_claims, indent=2),
+        "all_claims": json.dumps(all_claims, indent=2, cls=DateTimeEncoder),
         "input_claims_count": len(all_claims),
     }
     prompt = interpolate_prompt(prompt_template, variables)
@@ -225,7 +225,7 @@ async def run_context_pack_llm(
         "company_name": company_name,
         "pack_type": pack_type,
         "target_step": target_step,
-        "merged_claims": json.dumps(merged_claims, indent=2),
+        "merged_claims": json.dumps(merged_claims, indent=2, cls=DateTimeEncoder),
         "claims_count": len(merged_claims),
         "timestamp": datetime.utcnow().isoformat(),
     }
