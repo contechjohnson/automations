@@ -73,6 +73,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         produces_claims=True,
         extract_claims_after=True,  # LLM extracts claims from narrative
         uses_tools=["web_search"],
+        timeout_seconds=300,  # 5 min for agent web search
     ),
     "3-entity-research": StepConfig(
         prompt_id="3-entity-research",
@@ -111,6 +112,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
+        timeout_seconds=300,  # 5 min for firecrawl agent
     ),
     "5b-enrich-opportunity": StepConfig(
         prompt_id="5b-enrich-opportunity",
@@ -123,6 +125,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
+        timeout_seconds=300,  # 5 min for firecrawl agent
     ),
     "5c-client-specific": StepConfig(
         prompt_id="5c-client-specific",
@@ -135,6 +138,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
+        timeout_seconds=300,  # 5 min for firecrawl agent
     ),
     "6-enrich-contacts": StepConfig(
         prompt_id="6-enrich-contacts",

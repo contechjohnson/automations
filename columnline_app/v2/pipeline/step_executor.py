@@ -521,7 +521,13 @@ class StepExecutor:
                 agent_type = "research"
 
             # Use async agent function directly (avoids asyncio.run conflict)
-            result = await run_agent_async(prompt, agent_type=agent_type, model=config.model)
+            # Pass timeout from config (default 300s = 5 min)
+            result = await run_agent_async(
+                prompt,
+                agent_type=agent_type,
+                model=config.model,
+                timeout_seconds=config.timeout_seconds
+            )
 
             # Agents return the final output
             output = result.get("output", result) if isinstance(result, dict) else str(result)
@@ -531,6 +537,9 @@ class StepExecutor:
             print(f"Warning: Agent SDK not available ({e}), falling back to sync call")
             from workers.ai import ai
             output = ai(prompt, model=config.model, temperature=0.7)
+        except TimeoutError as e:
+            # Agent timed out - re-raise with more context
+            raise TimeoutError(f"Agent execution for {config.prompt_id} timed out: {e}")
 
         tokens_in = len(prompt.split()) * 1.3
         tokens_out = len(output.split()) * 1.3

@@ -286,15 +286,17 @@ async def run_agent_async(
     agent_type: str = "research",
     model: str = "gpt-4.1",
     instructions: Optional[str] = None,
+    timeout_seconds: int = 300,  # 5 minute default timeout
 ) -> dict:
     """
-    Run an agent asynchronously.
+    Run an agent asynchronously with timeout protection.
 
     Args:
         input_text: The task/question for the agent
         agent_type: "research" | "firecrawl" | "full"
         model: Model to use (gpt-4.1, gpt-5.2, etc.)
         instructions: Optional custom instructions
+        timeout_seconds: Maximum time to wait (default 5 minutes)
 
     Returns:
         dict with input, output, model, agent_type
@@ -306,14 +308,20 @@ async def run_agent_async(
     else:
         agent = create_research_agent(model=model, instructions=instructions)
 
-    result = await Runner.run(agent, input_text)
-
-    return {
-        "input": input_text,
-        "output": result.final_output,
-        "model": model,
-        "agent_type": agent_type,
-    }
+    try:
+        # Add timeout to prevent indefinite hangs
+        result = await asyncio.wait_for(
+            Runner.run(agent, input_text),
+            timeout=timeout_seconds
+        )
+        return {
+            "input": input_text,
+            "output": result.final_output,
+            "model": model,
+            "agent_type": agent_type,
+        }
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"Agent execution timed out after {timeout_seconds} seconds")
 
 
 # ============================================================================
