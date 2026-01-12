@@ -21,6 +21,17 @@ from ..db.repository import V2Repository
 from .state import PipelineState
 
 
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects"""
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        from datetime import date
+        if isinstance(obj, date):
+            return obj.isoformat()
+        return super().default(obj)
+
+
 def interpolate_prompt(template: str, variables: Dict[str, Any]) -> str:
     """
     Interpolate variables into prompt template.
@@ -46,7 +57,9 @@ def interpolate_prompt(template: str, variables: Dict[str, Any]) -> str:
         placeholder = "{{" + key + "}}"
         if placeholder in result:
             if isinstance(value, (dict, list)):
-                value_str = json.dumps(value, indent=2)
+                value_str = json.dumps(value, indent=2, cls=DateTimeEncoder)
+            elif isinstance(value, datetime):
+                value_str = value.isoformat()
             else:
                 value_str = str(value)
             result = result.replace(placeholder, value_str)
