@@ -206,15 +206,38 @@ def render_run_detail(run_detail: dict):
 
 def render_step_io(step: dict):
     """Render step input/output"""
-    st.markdown(f"#### {step.get('step')} I/O")
+    step_name = step.get('step', 'unknown')
+    st.markdown(f"#### {step_name} I/O")
 
+    # Show model and duration
+    col_meta1, col_meta2, col_meta3 = st.columns(3)
+    with col_meta1:
+        st.write(f"**Model:** {step.get('model', '-')}")
+    with col_meta2:
+        duration = step.get("duration_ms")
+        st.write(f"**Duration:** {duration/1000:.1f}s" if duration else "**Duration:** -")
+    with col_meta3:
+        tokens = step.get("tokens_in", 0) or 0
+        st.write(f"**Tokens In:** {tokens:,}" if tokens else "**Tokens In:** -")
+
+    # Input/Output columns
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown("**Input Variables**")
         input_vars = step.get("input_variables", {})
         if input_vars:
-            st.json(input_vars)
+            # Special handling for claims merge input
+            if "total_claims_to_merge" in input_vars:
+                st.write(f"Total claims to merge: **{input_vars.get('total_claims_to_merge', 0)}**")
+                claims_by_step = input_vars.get("claims_by_step", {})
+                if claims_by_step:
+                    st.write("Claims by step:")
+                    for s, count in claims_by_step.items():
+                        st.write(f"  - {s}: {count}")
+                st.write(f"Company: {input_vars.get('company_name', '-')}")
+            else:
+                st.json(input_vars)
         else:
             st.info("No input variables")
 
@@ -222,22 +245,58 @@ def render_step_io(step: dict):
         st.markdown("**Output**")
         output = step.get("parsed_output", {})
         if output:
-            st.json(output)
+            # Special handling for claims merge output
+            if "merged_claims" in output:
+                merged_claims = output.get("merged_claims", [])
+                st.write(f"**Merged Claims: {len(merged_claims)}**")
+                for mc in merged_claims[:5]:
+                    st.write(f"- `{mc.get('claim_type', 'NOTE')}`: {mc.get('statement', '')[:80]}")
+                if len(merged_claims) > 5:
+                    st.write(f"... and {len(merged_claims) - 5} more")
 
-            # Show claims if present
-            claims = output.get("claims", [])
-            if claims:
-                st.markdown(f"**Claims Extracted: {len(claims)}**")
-                for claim in claims[:10]:  # Show first 10
-                    st.write(f"- {claim.get('claim_type', 'NOTE')}: {claim.get('statement', '')[:100]}")
-                if len(claims) > 10:
-                    st.write(f"... and {len(claims) - 10} more")
+                # Show merge stats
+                stats = output.get("merge_stats", {})
+                if stats:
+                    st.write("**Merge Stats:**")
+                    st.write(f"  - Input: {stats.get('input_claims', 0)}")
+                    st.write(f"  - Output: {stats.get('output_claims', 0)}")
+                    st.write(f"  - Duplicates merged: {stats.get('duplicates_merged', 0)}")
+                    st.write(f"  - Conflicts resolved: {stats.get('conflicts_resolved', 0)}")
+            else:
+                # Check for claims extraction summary
+                extraction = output.get("_claims_extraction", {})
+                if extraction:
+                    st.write(f"**Claims Extracted:** {extraction.get('total_claims', 0)}")
+                    by_type = extraction.get("by_type", {})
+                    if by_type:
+                        non_zero = {k: v for k, v in by_type.items() if v > 0}
+                        if non_zero:
+                            st.write("By type: " + ", ".join(f"{k}: {v}" for k, v in non_zero.items()))
+
+                # Show raw output JSON
+                st.json(output)
+
+                # Show claims if present in output
+                claims = output.get("claims", [])
+                if claims:
+                    st.markdown(f"**Claims in Output: {len(claims)}**")
+                    for claim in claims[:10]:
+                        st.write(f"- {claim.get('claim_type', 'NOTE')}: {claim.get('statement', '')[:100]}")
+                    if len(claims) > 10:
+                        st.write(f"... and {len(claims) - 10} more")
         else:
             raw = step.get("raw_output", "")
             if raw:
                 st.text(raw[:1000] + ("..." if len(raw) > 1000 else ""))
             else:
                 st.info("No output")
+
+    # Error if present
+    if step.get("error_message"):
+        st.error(f"**Error:** {step['error_message']}")
+        if step.get("error_traceback"):
+            with st.expander("Full Traceback"):
+                st.code(step["error_traceback"])
 
     # Close button
     if st.button("Close", key=f"close_{step['id']}"):
