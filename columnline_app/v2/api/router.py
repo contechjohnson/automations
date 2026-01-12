@@ -63,6 +63,60 @@ async def update_client(client_id: str, updates: Dict[str, Any]):
 
 # ---------- Prompts ----------
 
+class CreatePromptRequest(BaseModel):
+    prompt_id: str
+    name: str
+    content: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.post("/prompts")
+async def create_prompt(request: CreatePromptRequest):
+    """Create a new prompt with optional initial content"""
+    repo = get_repo()
+
+    # Check if prompt already exists
+    existing = repo.get_prompt(request.prompt_id)
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Prompt {request.prompt_id} already exists")
+
+    # Try to load content from file if not provided
+    content = request.content
+    if not content:
+        prompt_file = f"prompts/v2/{request.prompt_id}.md"
+        if os.path.exists(prompt_file):
+            with open(prompt_file, "r") as f:
+                content = f.read()
+        else:
+            content = f"# {request.name}\n\nPrompt content here..."
+
+    # Insert into v2_prompts table
+    prompt_data = {
+        "prompt_id": request.prompt_id,
+        "name": request.name,
+        "description": request.description,
+        "current_version": 1,
+        "is_active": True,
+    }
+    result = repo.client.table("v2_prompts").insert(prompt_data).execute()
+
+    # Create initial version
+    version_data = {
+        "prompt_id": request.prompt_id,
+        "version_number": 1,
+        "content": content,
+        "change_notes": "Initial version",
+        "created_by": "api",
+    }
+    repo.client.table("v2_prompt_versions").insert(version_data).execute()
+
+    return {
+        "prompt_id": request.prompt_id,
+        "message": "Prompt created successfully",
+        "content_loaded_from_file": request.content is None
+    }
+
+
 @router.get("/prompts")
 async def list_prompts(is_active: bool = True):
     """List all prompts with metadata"""

@@ -1,7 +1,8 @@
 """
-Execution Logs Page
+Execution Logs Page - SIMPLE VERSION
 
-Simple table of all LLM calls with full I/O inspection.
+Shows every LLM call with full I/O.
+This is the low-level trace - every single API call to OpenAI/etc.
 """
 import streamlit as st
 import os
@@ -15,19 +16,17 @@ from columnline_app.v2.db.repository import V2Repository
 
 
 def get_logs(limit: int = 50):
-    """Fetch recent execution logs from local database"""
+    """Fetch recent execution logs"""
     try:
         repo = V2Repository()
-        # Get from execution_logs table
-        result = repo.supabase.table("execution_logs").select("*").order("started_at", desc=True).limit(limit).execute()
+        result = repo.client.table("execution_logs").select("*").order("started_at", desc=True).limit(limit).execute()
         return result.data if result.data else []
     except Exception as e:
         st.error(f"Failed to fetch logs: {e}")
-    return []
+        return []
 
 
 def format_time(timestamp_str: str) -> str:
-    """Format timestamp for display"""
     if not timestamp_str:
         return "-"
     try:
@@ -37,23 +36,17 @@ def format_time(timestamp_str: str) -> str:
         return timestamp_str
 
 
-def status_emoji(status: str) -> str:
-    """Status to emoji"""
-    return {
-        "success": "✅",
-        "failed": "❌",
-        "running": "🔵"
-    }.get(status, "❓")
+def status_icon(status: str) -> str:
+    return {"success": "✅", "failed": "❌", "running": "🔵"}.get(status, "❓")
 
 
 def render_logs_page():
-    """Main logs page"""
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.subheader("Execution Logs")
-    with col2:
-        if st.button("🔄 Refresh", key="refresh_logs"):
-            st.rerun()
+    """Main logs page - simple list of all LLM calls"""
+    st.subheader("Execution Logs")
+    st.markdown("*Low-level trace of every LLM API call. Use this to debug specific calls.*")
+
+    if st.button("🔄 Refresh", key="refresh_logs_main"):
+        st.rerun()
 
     # Get logs
     logs = get_logs()
@@ -62,58 +55,54 @@ def render_logs_page():
         st.info("No execution logs found.")
         return
 
-    # Display as table
+    st.markdown("---")
+
+    # Show each log
     for i, log in enumerate(logs):
-        status = log.get("status", "unknown")
-        worker = log.get("worker_name", "unknown")
-        runtime = log.get("runtime_seconds") or 0
-        started = format_time(log.get("started_at"))
-
-        # Truncate worker name for display
-        worker_short = worker.split(".")[-1] if "." in worker else worker
-
-        header = f"{status_emoji(status)} **{worker_short}** | {started} | {runtime:.1f}s"
-
-        with st.expander(header, expanded=False):
-            render_log_detail(log, i)
+        render_log_entry(log, i)
 
 
-def render_log_detail(log: dict, index: int):
-    """Render log detail with I/O"""
+def render_log_entry(log: dict, index: int):
+    """Render a single log entry with full I/O"""
+    status = log.get("status", "unknown")
+    worker = log.get("worker_name", "unknown")
+    runtime = log.get("runtime_seconds") or 0
+    started = format_time(log.get("started_at"))
+
+    # Simplify worker name
+    worker_short = worker.split(".")[-1] if "." in worker else worker
+
+    # Header
+    st.markdown(f"#### {index + 1}. {status_icon(status)} `{worker_short}` - {started}")
+
+    # Metadata
     col1, col2, col3 = st.columns(3)
-
     with col1:
-        st.write(f"**Worker:** {log.get('worker_name', 'unknown')}")
+        st.write(f"**Full Worker:** `{worker}`")
     with col2:
-        st.write(f"**Status:** {log.get('status', 'unknown')}")
-    with col3:
-        runtime = log.get('runtime_seconds') or 0
         st.write(f"**Duration:** {runtime:.2f}s")
+    with col3:
+        tags = log.get("tags", [])
+        st.write(f"**Tags:** {', '.join(tags) if tags else '-'}")
 
-    # Tags
-    tags = log.get("tags", [])
-    if tags:
-        st.write(f"**Tags:** {', '.join(tags)}")
+    # Input
+    st.markdown("**INPUT:**")
+    input_data = log.get("input", {})
+    if input_data:
+        st.json(input_data)
+    else:
+        st.info("No input recorded")
 
-    # Full I/O from the log record
-    col1, col2 = st.columns(2)
+    # Output
+    st.markdown("**OUTPUT:**")
+    output_data = log.get("output", {})
+    if output_data:
+        st.json(output_data)
+    else:
+        st.info("No output recorded")
 
-    with col1:
-        st.markdown("**Input**")
-        input_data = log.get("input", {})
-        if input_data:
-            st.json(input_data)
-        else:
-            st.info("No input recorded")
-
-    with col2:
-        st.markdown("**Output**")
-        output_data = log.get("output", {})
-        if output_data:
-            st.json(output_data)
-        else:
-            st.info("No output recorded")
-
-    # Error if present
+    # Error
     if log.get("error_message"):
         st.error(f"**Error:** {log['error_message']}")
+
+    st.markdown("---")

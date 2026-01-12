@@ -204,13 +204,21 @@ async def run_claims_extraction_llm(
     narrative: str,
     source_step: str,
     company_name: str,
-    model: str = "gpt-4.1"
+    model: str = "gpt-4.1",
+    repo: Optional[V2Repository] = None,
+    pipeline_run_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Run the claims extraction LLM step on narrative output.
     This is THE post-processing step that converts narrative to atomic claims.
+
+    IMPORTANT: This is now a VISIBLE logged step - creates its own step_run record
+    so you can see both the narrative input and claims extraction output separately.
     """
     from workers.ai import ai
+
+    start_time = time.time()
+    step_id = f"{source_step}_claims_extraction"
 
     # Load claims extraction prompt
     prompt_template = load_prompt_content("claims-extraction")
@@ -223,11 +231,43 @@ async def run_claims_extraction_llm(
     }
     prompt = interpolate_prompt(prompt_template, variables)
 
+    # Create step run record if repo provided (for visibility)
+    step_run = None
+    if repo and pipeline_run_id:
+        step_run = repo.create_step_run(StepRun(
+            pipeline_run_id=pipeline_run_id,
+            step=step_id,
+            status=StepStatus.RUNNING,
+            model=model,
+            input_variables={
+                "source_step": source_step,
+                "company_name": company_name,
+                "narrative_length": len(narrative),
+                "narrative_preview": narrative[:1000] + "..." if len(narrative) > 1000 else narrative,
+            },
+            started_at=datetime.utcnow(),
+        ))
+
     # Run LLM
     result = ai(prompt, model=model, temperature=0.3)  # Lower temp for structured output
 
     # Parse JSON output
-    return parse_json_output(result)
+    parsed = parse_json_output(result)
+
+    # Update step run with results
+    if step_run and repo:
+        duration_ms = int((time.time() - start_time) * 1000)
+        claims_count = len(parsed.get("claims", [])) if parsed else 0
+        repo.update_step_run(step_run.id, {
+            "status": StepStatus.COMPLETED.value if parsed else StepStatus.FAILED.value,
+            "raw_output": result,
+            "parsed_output": parsed,
+            "duration_ms": duration_ms,
+            "completed_at": datetime.utcnow().isoformat(),
+        })
+        print(f"Claims extraction logged as step: {step_id} ({claims_count} claims, {duration_ms}ms)")
+
+    return parsed
 
 
 async def run_claims_merge_llm(
@@ -373,13 +413,20 @@ async def run_context_pack_llm(
     company_name: str,
     pack_type: str,
     target_step: str,
-    model: str = "gpt-4.1"
+    model: str = "gpt-4.1",
+    repo: Optional[V2Repository] = None,
+    pipeline_run_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Run the context pack generation LLM step.
     Creates a focused context summary from claims for downstream steps.
+
+    VISIBLE STEP: Creates its own step_run record for full transparency.
     """
     from workers.ai import ai
+
+    start_time = time.time()
+    step_id = f"context_pack_{pack_type}"
 
     # Load context pack prompt
     prompt_template = load_prompt_content("context-pack")
@@ -395,11 +442,42 @@ async def run_context_pack_llm(
     }
     prompt = interpolate_prompt(prompt_template, variables)
 
+    # Create step run record if repo provided (for visibility)
+    step_run = None
+    if repo and pipeline_run_id:
+        step_run = repo.create_step_run(StepRun(
+            pipeline_run_id=pipeline_run_id,
+            step=step_id,
+            status=StepStatus.RUNNING,
+            model=model,
+            input_variables={
+                "pack_type": pack_type,
+                "target_step": target_step,
+                "company_name": company_name,
+                "claims_count": len(merged_claims),
+            },
+            started_at=datetime.utcnow(),
+        ))
+
     # Run LLM
     result = ai(prompt, model=model, temperature=0.5)
 
     # Parse JSON output
-    return parse_json_output(result)
+    parsed = parse_json_output(result)
+
+    # Update step run with results
+    if step_run and repo:
+        duration_ms = int((time.time() - start_time) * 1000)
+        repo.update_step_run(step_run.id, {
+            "status": StepStatus.COMPLETED.value if parsed else StepStatus.FAILED.value,
+            "raw_output": result,
+            "parsed_output": parsed,
+            "duration_ms": duration_ms,
+            "completed_at": datetime.utcnow().isoformat(),
+        })
+        print(f"Context pack logged as step: {step_id} ({duration_ms}ms)")
+
+    return parsed
 
 
 class StepExecutor:
@@ -475,6 +553,7 @@ class StepExecutor:
             claims = []
             if step_config.produces_claims and step_config.extract_claims_after:
                 # Run claims extraction LLM on the narrative output
+                # This creates a SEPARATE visible step run for claims extraction
                 company_name = state.get_variable("company_name") or "Unknown"
                 narrative = raw_output or ""
 
@@ -483,7 +562,9 @@ class StepExecutor:
                     narrative=narrative,
                     source_step=step_id,
                     company_name=company_name,
-                    model="gpt-4.1"  # Use 4.1 for extraction
+                    model="gpt-4.1",  # Use 4.1 for extraction
+                    repo=self.repo,  # Pass repo to create visible step run
+                    pipeline_run_id=state.pipeline_run_id,  # Pass run ID for logging
                 )
 
                 if extraction_result:
@@ -495,10 +576,14 @@ class StepExecutor:
                     )
                     print(f"Extracted {len(claims)} claims from {step_id}")
 
-                    # Update parsed_output with extraction result for tracking
+                    # Store extraction summary in the parent step's parsed_output
+                    # The full extraction result is in its own step run
                     if parsed_output is None:
                         parsed_output = {}
-                    parsed_output["_claims_extraction"] = extraction_result.get("extraction_summary", {})
+                    parsed_output["_claims_extraction_summary"] = {
+                        "claims_count": len(claims),
+                        "extraction_step_id": f"{step_id}_claims_extraction",
+                    }
 
             elif step_config.produces_claims and parsed_output:
                 # Fallback: Direct extraction from JSON output (legacy)
@@ -639,7 +724,9 @@ class StepExecutor:
             company_name=company_name,
             pack_type=pack_type,
             target_step=target_step,
-            model="gpt-4.1"
+            model="gpt-4.1",
+            repo=self.repo,  # Pass repo for visibility
+            pipeline_run_id=state.pipeline_run_id,  # Pass run ID for logging
         )
 
         return pack_result
