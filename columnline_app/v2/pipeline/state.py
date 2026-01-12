@@ -91,8 +91,8 @@ class PipelineState:
         # context_pack is a special variable that resolves to the most recent context pack
         if name == "context_pack":
             # Return the most relevant context pack data
-            # Priority: signal_discovery -> signal_to_entity -> entity_to_contacts
-            for pack_type in ["signal_discovery", "signal_to_entity", "entity_to_contacts"]:
+            # Priority: signal_to_entity -> entity_to_contacts -> contacts_to_enrichment
+            for pack_type in ["signal_to_entity", "entity_to_contacts", "contacts_to_enrichment"]:
                 if pack_type in self.context_packs:
                     return self.context_packs[pack_type].pack_data
             return None

@@ -238,10 +238,10 @@ class PipelineRunner:
         if step_config.produces_context_pack and step_config.context_pack_type:
             pack_type = step_config.context_pack_type
 
-            # For signal_discovery pack, extract directly from step output (no LLM needed)
-            if pack_type == "signal_discovery":
+            # For signal_to_entity pack from step 2, extract directly from step output (no LLM needed)
+            if pack_type == "signal_to_entity" and step_id == "2-signal-discovery":
                 pack_data = self._build_context_pack(pack_type, state, output)
-                print(f"Built signal_discovery pack: {list(pack_data.keys()) if pack_data else 'None'}")
+                print(f"Built signal_to_entity pack from step 2: {list(pack_data.keys()) if pack_data else 'None'}")
             else:
                 # Use LLM-generated context pack for other types
                 pack_data = await self.executor.generate_context_pack(
@@ -574,29 +574,32 @@ class PipelineRunner:
         # Handle None output gracefully
         output = latest_output or {}
 
-        if pack_type == "signal_discovery":
-            # Pack from step 2 to step 3 - contains the lead/signal found
+        if pack_type == "signal_to_entity":
+            # Pack from step 2 (signal discovery) to step 3 (entity research)
+            # OR from step 3 to step 4 if step 3 also produces this type
+            # Check if this is from step 2 (has "lead" object) or step 3 (has more details)
             lead = output.get("lead", {})
-            return {
-                "company_name": lead.get("company_name") or output.get("company_name"),
-                "company_domain": lead.get("company_domain") or output.get("domain"),
-                "primary_signal": lead.get("primary_signal") or output.get("primary_signal"),
-                "initial_assessment": lead.get("initial_assessment", {}),
-                "research_questions": lead.get("next_research_questions", []),
-                "sources": output.get("sources", []),
-            }
-        elif pack_type == "signal_to_entity":
-            # Pack from step 3 (entity research) to step 4 (contact discovery)
-            # Contains company identity, domains, and project details
-            return {
-                "company_name": output.get("company_name") or state.get_variable("company_name"),
-                "company_domain": output.get("domain") or output.get("company_domain") or state.get_variable("company_domain"),
-                "corporate_structure": output.get("corporate_structure"),
-                "partner_organizations": output.get("partner_organizations", []),
-                "project_details": output.get("project_details"),
-                "primary_signal": output.get("primary_signal") or state.get_variable("primary_signal"),
-                "key_facts": output.get("key_facts", []),
-            }
+            if lead:
+                # This is from step 2 (signal discovery) - extract lead info
+                return {
+                    "company_name": lead.get("company_name") or output.get("company_name"),
+                    "company_domain": lead.get("company_domain") or output.get("domain"),
+                    "primary_signal": lead.get("primary_signal") or output.get("primary_signal"),
+                    "initial_assessment": lead.get("initial_assessment", {}),
+                    "research_questions": lead.get("next_research_questions", []),
+                    "sources": output.get("sources", []),
+                }
+            else:
+                # This is from step 3 (entity research) - richer company details
+                return {
+                    "company_name": output.get("company_name") or state.get_variable("company_name"),
+                    "company_domain": output.get("domain") or output.get("company_domain") or state.get_variable("company_domain"),
+                    "corporate_structure": output.get("corporate_structure"),
+                    "partner_organizations": output.get("partner_organizations", []),
+                    "project_details": output.get("project_details"),
+                    "primary_signal": output.get("primary_signal") or state.get_variable("primary_signal"),
+                    "key_facts": output.get("key_facts", []),
+                }
         elif pack_type == "entity_to_contacts":
             return {
                 "company_name": output.get("company_name") or state.get_variable("company_name"),
