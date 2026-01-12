@@ -196,8 +196,35 @@ class V2Repository:
 
     def update_step_run(self, step_run_id: str, updates: Dict[str, Any]) -> StepRun:
         """Update a step run"""
+        from datetime import date as date_type
+        import json
+
         if "status" in updates and isinstance(updates["status"], StepStatus):
             updates["status"] = updates["status"].value
+
+        # Serialize datetime/date objects in JSONB fields
+        def serialize_dates(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            elif isinstance(obj, date_type):
+                return obj.isoformat()
+            elif isinstance(obj, dict):
+                return {k: serialize_dates(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [serialize_dates(item) for item in obj]
+            return obj
+
+        # Apply serialization to JSONB fields
+        for field in ["input_variables", "parsed_output", "raw_output"]:
+            if field in updates and updates[field] is not None:
+                updates[field] = serialize_dates(updates[field])
+
+        # Handle datetime fields
+        if "started_at" in updates and isinstance(updates["started_at"], datetime):
+            updates["started_at"] = updates["started_at"].isoformat()
+        if "completed_at" in updates and isinstance(updates["completed_at"], datetime):
+            updates["completed_at"] = updates["completed_at"].isoformat()
+
         result = self.client.table("v2_step_runs").update(updates).eq("id", step_run_id).execute()
         return StepRun(**result.data[0])
 
