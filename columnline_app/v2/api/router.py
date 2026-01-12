@@ -95,7 +95,6 @@ async def create_prompt(request: CreatePromptRequest):
         prompt_data = {
             "prompt_id": request.prompt_id,
             "name": request.name,
-            "description": request.description,
             "current_version": 1,
             "is_active": True,
         }
