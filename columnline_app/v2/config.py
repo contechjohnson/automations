@@ -1,12 +1,12 @@
 """
 Pipeline configuration - step definitions, execution modes, stage ordering
 
-Architecture Notes:
-- Claims extraction is an LLM step (same prompt for all extractors)
-- Claims merge is an LLM step at 7b-insight
-- Context packs are LLM-orchestrated outputs
-- Copy generation runs PER CONTACT
-- Writer steps run in parallel
+Architecture Notes (aligned with Make.com flow):
+- FIND_LEAD: Search, Signal, Entity, Contact Discovery (sequential deep research)
+- ENRICH_LEAD: 5a/5b/5c + Media run in parallel
+- INSIGHT: Claims merge, context pack for writers
+- FINAL: Dossier Plan + 6 Writers (parallel) + Contact Enrichment (parallel)
+- Contact enrichment runs 6.2 per contact, writes to v2_contacts table
 """
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
@@ -22,13 +22,10 @@ class ExecutionMode(str, Enum):
 
 
 class Stage(str, Enum):
-    FIND_LEAD = "FIND_LEAD"
-    ENRICH_LEAD = "ENRICH_LEAD"
-    ENRICH_CONTACTS = "ENRICH_CONTACTS"
-    COPY = "COPY"
-    INSIGHT = "INSIGHT"
-    MEDIA = "MEDIA"
-    DOSSIER_PLAN = "DOSSIER_PLAN"
+    FIND_LEAD = "FIND_LEAD"           # 1, 2, 3, 4 - Signal discovery and contact finding
+    ENRICH_LEAD = "ENRICH_LEAD"       # 5a, 5b, 5c, 8-media (parallel)
+    INSIGHT = "INSIGHT"               # 7b - Claims merge, context pack
+    FINAL = "FINAL"                   # 9 + writers + 06 contact enrichment (parallel)
 
 
 @dataclass
@@ -50,11 +47,16 @@ class StepConfig:
     extract_claims_after: bool = False  # If True, run claims extraction prompt after this step
     # Per-contact config
     per_contact: bool = False  # If True, runs once per contact
+    # Writer config
+    is_writer: bool = False  # If True, this is a dossier section writer
+    section_key: Optional[str] = None  # For writers: which section they produce
 
 
 # Pipeline step definitions
-# Note: extract_claims_after=True means we run claims-extraction.md after this step
 PIPELINE_STEPS: Dict[str, StepConfig] = {
+    # =========================================================================
+    # STAGE 1: FIND_LEAD - Signal discovery and contact finding
+    # =========================================================================
     "1-search-builder": StepConfig(
         prompt_id="1-search-builder",
         name="Search Builder",
@@ -71,11 +73,11 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
         produces_claims=True,
-        extract_claims_after=True,  # LLM extracts claims from narrative
+        extract_claims_after=True,
         uses_tools=["web_search"],
-        timeout_seconds=300,  # 5 min for agent web search
-        produces_context_pack=True,  # Creates lead context for step 3
-        context_pack_type="signal_to_entity",  # Pack for step 3 (entity research)
+        timeout_seconds=300,
+        produces_context_pack=True,
+        context_pack_type="signal_to_entity",
     ),
     "3-entity-research": StepConfig(
         prompt_id="3-entity-research",
@@ -85,10 +87,10 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.BACKGROUND,
         model="o4-mini-deep-research",
         produces_claims=True,
-        extract_claims_after=True,  # LLM extracts claims from narrative
+        extract_claims_after=True,
         produces_context_pack=True,
         context_pack_type="signal_to_entity",
-        timeout_seconds=900,  # 15 min - deep research can take time
+        timeout_seconds=900,
     ),
     "4-contact-discovery": StepConfig(
         prompt_id="4-contact-discovery",
@@ -98,11 +100,15 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.BACKGROUND,
         model="o4-mini-deep-research",
         produces_claims=True,
-        extract_claims_after=True,  # LLM extracts claims from narrative
+        extract_claims_after=True,
         produces_context_pack=True,
         context_pack_type="entity_to_contacts",
-        timeout_seconds=900,  # 15 min - deep research can take time
+        timeout_seconds=900,
     ),
+
+    # =========================================================================
+    # STAGE 2: ENRICH_LEAD - Parallel enrichment (5a, 5b, 5c, 8-media)
+    # =========================================================================
     "5a-enrich-lead": StepConfig(
         prompt_id="5a-enrich-lead",
         name="Enrich Lead",
@@ -114,7 +120,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
-        timeout_seconds=300,  # 5 min for firecrawl agent
+        timeout_seconds=300,
     ),
     "5b-enrich-opportunity": StepConfig(
         prompt_id="5b-enrich-opportunity",
@@ -127,7 +133,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
-        timeout_seconds=300,  # 5 min for firecrawl agent
+        timeout_seconds=300,
     ),
     "5c-client-specific": StepConfig(
         prompt_id="5c-client-specific",
@@ -140,45 +146,25 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
-        timeout_seconds=300,  # 5 min for firecrawl agent
+        timeout_seconds=300,
     ),
-    "6-enrich-contacts": StepConfig(
-        prompt_id="6-enrich-contacts",
-        name="Enrich Contacts (Extract)",
-        stage=Stage.ENRICH_CONTACTS,
-        step_order=6,
-        execution_mode=ExecutionMode.SYNC,
-        model="gpt-4.1",
-    ),
-    "6.2-enrich-contact": StepConfig(
-        prompt_id="6.2-enrich-contact",
-        name="Enrich Contact (Individual)",
-        stage=Stage.ENRICH_CONTACTS,
-        step_order=6,
+    "8-media": StepConfig(
+        prompt_id="8-media",
+        name="Media Enrichment",
+        stage=Stage.ENRICH_LEAD,  # Now in ENRICH_LEAD parallel group
+        step_order=5,
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
-        per_contact=True,  # Runs per contact discovered
-        uses_tools=["web_search", "firecrawl_scrape"],
+        produces_claims=True,
+        extract_claims_after=True,
+        parallel_group="enrich",  # Runs in parallel with 5a/5b/5c
+        uses_tools=["firecrawl_scrape"],
+        timeout_seconds=300,
     ),
-    "7a-copy": StepConfig(
-        prompt_id="7a-copy",
-        name="Copy Generation",
-        stage=Stage.COPY,
-        step_order=7,
-        execution_mode=ExecutionMode.SYNC,
-        model="gpt-4.1",
-        per_contact=True,  # Runs per contact for personalized copy
-    ),
-    "7.2-copy-client-override": StepConfig(
-        prompt_id="7.2-copy-client-override",
-        name="Copy Client Override",
-        stage=Stage.COPY,
-        step_order=7,
-        execution_mode=ExecutionMode.SYNC,
-        model="gpt-4.1-mini",
-        per_contact=True,  # Runs per contact
-    ),
-    # Claims merge step - processes ALL accumulated claims
+
+    # =========================================================================
+    # STAGE 3: INSIGHT - Claims merge and context pack generation
+    # =========================================================================
     "7b-insight": StepConfig(
         prompt_id="7b-insight",
         name="Claims Merge & Insight",
@@ -186,41 +172,141 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         step_order=7,
         execution_mode=ExecutionMode.SYNC,
         model="gpt-4.1",
-        merges_claims=True,  # This is the merge point
+        merges_claims=True,
         produces_context_pack=True,
         context_pack_type="contacts_to_enrichment",
     ),
-    "8-media": StepConfig(
-        prompt_id="8-media",
-        name="Media Enrichment",
-        stage=Stage.MEDIA,
-        step_order=8,
-        execution_mode=ExecutionMode.AGENT,
-        model="gpt-4.1",
-        produces_claims=True,
-        extract_claims_after=True,
-        uses_tools=["firecrawl_scrape"],
-    ),
+
+    # =========================================================================
+    # STAGE 4: FINAL - Dossier Plan, Writers (parallel), Contact Enrichment (parallel)
+    # =========================================================================
     "9-dossier-plan": StepConfig(
         prompt_id="9-dossier-plan",
         name="Dossier Plan",
-        stage=Stage.DOSSIER_PLAN,
+        stage=Stage.FINAL,
         step_order=9,
         execution_mode=ExecutionMode.SYNC,
         model="gpt-4.1",
     ),
+
+    # 6 Writers - run in parallel after dossier plan
+    "writer-intro": StepConfig(
+        prompt_id="writer-intro",
+        name="Writer: Intro",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="writers",
+        is_writer=True,
+        section_key="intro",
+    ),
+    "writer-signals": StepConfig(
+        prompt_id="writer-signals",
+        name="Writer: Signals",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="writers",
+        is_writer=True,
+        section_key="signals",
+    ),
+    "writer-lead-intelligence": StepConfig(
+        prompt_id="writer-lead-intelligence",
+        name="Writer: Lead Intelligence",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="writers",
+        is_writer=True,
+        section_key="lead_intelligence",
+    ),
+    "writer-strategy": StepConfig(
+        prompt_id="writer-strategy",
+        name="Writer: Strategy",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="writers",
+        is_writer=True,
+        section_key="strategy",
+    ),
+    "writer-opportunity": StepConfig(
+        prompt_id="writer-opportunity",
+        name="Writer: Opportunity",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="writers",
+        is_writer=True,
+        section_key="opportunity",
+    ),
+    "writer-client-specific": StepConfig(
+        prompt_id="writer-client-specific",
+        name="Writer: Client Specific",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="writers",
+        is_writer=True,
+        section_key="client_specific",
+    ),
+
+    # Contact Enrichment - runs in parallel with writers
+    "6-enrich-contacts": StepConfig(
+        prompt_id="6-enrich-contacts",
+        name="Enrich Contacts (Parse)",
+        stage=Stage.FINAL,  # Now in FINAL stage, parallel with writers
+        step_order=10,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        parallel_group="final_parallel",  # Different group - runs alongside writers
+    ),
+    "6.2-enrich-contact": StepConfig(
+        prompt_id="6.2-enrich-contact",
+        name="Enrich Contact (Individual)",
+        stage=Stage.FINAL,
+        step_order=10,
+        execution_mode=ExecutionMode.AGENT,
+        model="gpt-4.1",
+        per_contact=True,  # Runs per contact discovered
+        uses_tools=["web_search", "firecrawl_scrape"],  # Also: anymail_finder, linkedin_scraper
+        timeout_seconds=120,  # 2 min per contact
+    ),
+
+    # Copy generation - per contact, after enrichment
+    "7a-copy": StepConfig(
+        prompt_id="7a-copy",
+        name="Copy Generation",
+        stage=Stage.FINAL,
+        step_order=11,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1",
+        per_contact=True,
+    ),
+    "7.2-copy-client-override": StepConfig(
+        prompt_id="7.2-copy-client-override",
+        name="Copy Client Override",
+        stage=Stage.FINAL,
+        step_order=11,
+        execution_mode=ExecutionMode.SYNC,
+        model="gpt-4.1-mini",
+        per_contact=True,
+    ),
 }
 
 
-# Stage execution order
+# Stage execution order (aligned with Make.com)
 STAGE_ORDER = [
-    Stage.FIND_LEAD,
-    Stage.ENRICH_LEAD,
-    Stage.ENRICH_CONTACTS,
-    Stage.COPY,
-    Stage.INSIGHT,
-    Stage.MEDIA,
-    Stage.DOSSIER_PLAN,
+    Stage.FIND_LEAD,      # 1, 2, 3, 4 - Sequential deep research
+    Stage.ENRICH_LEAD,    # 5a, 5b, 5c, 8-media - Parallel enrichment
+    Stage.INSIGHT,        # 7b - Claims merge (sync, blocking)
+    Stage.FINAL,          # 9-dossier-plan, writers, 06-contact-enrichment (parallel)
 ]
 
 
@@ -243,3 +329,13 @@ def get_parallel_groups_for_stage(stage: Stage) -> Dict[str, List[StepConfig]]:
         else:
             groups["sequential"].append(step)
     return groups
+
+
+def get_writer_steps() -> List[StepConfig]:
+    """Get all writer steps"""
+    return [s for s in PIPELINE_STEPS.values() if s.is_writer]
+
+
+def get_writer_section_keys() -> List[str]:
+    """Get section keys for all writers"""
+    return [s.section_key for s in get_writer_steps() if s.section_key]

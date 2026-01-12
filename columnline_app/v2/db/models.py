@@ -213,6 +213,7 @@ class Dossier(BaseModel):
     primary_signal: Optional[str] = None
     status: str = "skeleton"
     sections_completed: List[str] = Field(default_factory=list)
+    sections: Dict[str, Any] = Field(default_factory=dict)  # Writer outputs keyed by section_key
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     released_at: Optional[datetime] = None

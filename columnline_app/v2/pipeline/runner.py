@@ -1,5 +1,11 @@
 """
 Pipeline runner - orchestrates the full dossier generation pipeline
+
+Architecture (aligned with Make.com flow):
+- FIND_LEAD: 1-search-builder -> 2-signal-discovery -> 3-entity-research -> 4-contact-discovery
+- ENRICH_LEAD: [5a, 5b, 5c, 8-media in parallel]
+- INSIGHT: 7b-insight (merge all claims, create context pack for writers)
+- FINAL: 9-dossier-plan, then [6 writers + contact enrichment in parallel]
 """
 import asyncio
 import traceback
@@ -9,6 +15,7 @@ from datetime import datetime
 from ..config import (
     PIPELINE_STEPS, STAGE_ORDER, Stage,
     get_steps_for_stage, get_parallel_groups_for_stage,
+    get_writer_steps, get_writer_section_keys,
     StepConfig, ExecutionMode
 )
 from ..db.models import (
@@ -24,14 +31,11 @@ class PipelineRunner:
     """
     Orchestrates the full dossier generation pipeline.
 
-    Execution flow:
+    Execution flow (aligned with Make.com):
     1. FIND_LEAD: search_builder -> signal_discovery -> entity_research -> contact_discovery
-    2. ENRICH_LEAD: [5a, 5b, 5c in parallel]
-    3. ENRICH_CONTACTS: 6-enrich-contacts -> [6.2-enrich-contact per contact]
-    4. COPY: 7a-copy -> 7.2-copy-client-override
-    5. INSIGHT: 7b-insight (merge claims)
-    6. MEDIA: 8-media
-    7. DOSSIER_PLAN: 9-dossier-plan
+    2. ENRICH_LEAD: [5a, 5b, 5c, 8-media in parallel]
+    3. INSIGHT: 7b-insight (merge claims, build context pack)
+    4. FINAL: 9-dossier-plan, then [6 writers + 6-enrich-contacts + 6.2 per-contact in parallel]
     """
 
     def __init__(self, repo: Optional[V2Repository] = None):
@@ -218,6 +222,11 @@ class PipelineRunner:
         # Special handling for claims merge at insight step
         if step_config.merges_claims and step_id == "7b-insight":
             await self._execute_claims_merge(step_config, state, pipeline_run_id)
+            return
+
+        # Special handling for writer steps - need to inject routed claims
+        if step_config.is_writer:
+            await self._execute_writer_step(step_config, state, pipeline_run_id)
             return
 
         # Execute step
@@ -409,6 +418,134 @@ class PipelineRunner:
             step = claim.source_step or "unknown"
             counts[step] = counts.get(step, 0) + 1
         return counts
+
+    async def _execute_writer_step(
+        self,
+        step_config: StepConfig,
+        state: PipelineState,
+        pipeline_run_id: str
+    ):
+        """
+        Execute a dossier section writer step.
+
+        Writers receive:
+        - claims: Routed claims for this section from dossier plan
+        - resolved_contacts: Merged contacts from insight step
+        - resolved_signals: Merged signals from insight step
+        - Client context (name, services, differentiators, etc.)
+        """
+        import time
+        import json
+        step_id = step_config.prompt_id
+        section_key = step_config.section_key
+
+        print(f"Executing writer step: {step_id} (section: {section_key})")
+        start_time = time.time()
+
+        # Create step run record
+        step_run = self.repo.create_step_run(StepRun(
+            pipeline_run_id=pipeline_run_id,
+            step=step_id,
+            prompt_id=step_id,
+            status=StepStatus.RUNNING,
+            model=step_config.model,
+            started_at=datetime.utcnow(),
+        ))
+
+        try:
+            # Get dossier plan output for routing
+            dossier_plan = state.step_outputs.get("9-dossier-plan", {})
+            section_routing = dossier_plan.get("section_routing", {})
+
+            # Get claims routed to this section
+            section_info = section_routing.get(section_key.upper(), {}) if section_key else {}
+            routed_claim_ids = section_info.get("claim_ids", [])
+
+            # Filter claims to just the routed ones
+            # Use merged claims if available, otherwise raw claims
+            claims_pool = state.merged_claims if state.merged_claims else state.claims
+            routed_claims = [
+                {
+                    "claim_id": c.claim_id,
+                    "claim_type": c.claim_type.value if hasattr(c.claim_type, 'value') else c.claim_type,
+                    "statement": c.statement,
+                    "entities": c.entities,
+                    "source_url": c.source_url,
+                    "source_name": c.source_name,
+                    "confidence": c.confidence.value if hasattr(c.confidence, 'value') else c.confidence,
+                }
+                for c in claims_pool
+                if c.claim_id in routed_claim_ids or not routed_claim_ids  # Use all claims if no routing
+            ]
+
+            # Get resolved contacts and signals from insight
+            insight_output = state.step_outputs.get("7b-insight", {})
+            resolved_contacts = insight_output.get("resolved_contacts", [])
+            resolved_signals = insight_output.get("resolved_signals", [])
+
+            # Build writer-specific variables
+            writer_vars = {
+                "claims": json.dumps(routed_claims, indent=2),
+                "resolved_contacts": json.dumps(resolved_contacts, indent=2),
+                "resolved_signals": json.dumps(resolved_signals, indent=2),
+                "section_key": section_key,
+                "coverage_notes": section_info.get("coverage_notes", ""),
+            }
+
+            # Add to state seed for interpolation
+            writer_state = PipelineState(
+                pipeline_run_id=state.pipeline_run_id,
+                client=state.client,
+                seed={**state.seed, **writer_vars},
+                step_outputs=state.step_outputs.copy(),
+                claims=state.claims.copy(),
+                merged_claims=state.merged_claims.copy(),
+                context_packs=state.context_packs.copy(),
+            )
+
+            # Update step run with input
+            self.repo.update_step_run(step_run.id, {
+                "input_variables": {
+                    "section_key": section_key,
+                    "routed_claims_count": len(routed_claims),
+                    "resolved_contacts_count": len(resolved_contacts),
+                    "resolved_signals_count": len(resolved_signals),
+                },
+            })
+
+            # Execute the step
+            step_run, output, _ = await self.executor.execute_step(step_config, writer_state)
+
+            # Store writer output in state
+            if output:
+                state.add_step_output(step_id, output)
+
+                # Also store in writer_sections for dossier assembly
+                if not hasattr(state, 'writer_sections'):
+                    state.writer_sections = {}
+                state.writer_sections[section_key] = output
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            # Mark step completed
+            state.steps_completed.append(step_id)
+            self.repo.update_pipeline_run(pipeline_run_id, {
+                "steps_completed": state.steps_completed,
+            })
+
+            print(f"  Writer {section_key} completed in {duration_ms}ms")
+
+        except Exception as e:
+            # Record failure
+            duration_ms = int((time.time() - start_time) * 1000)
+            self.repo.update_step_run(step_run.id, {
+                "status": StepStatus.FAILED.value,
+                "error_message": str(e),
+                "error_traceback": traceback.format_exc(),
+                "duration_ms": duration_ms,
+                "completed_at": datetime.utcnow().isoformat(),
+            })
+            raise
 
     async def _execute_per_contact_copy(
         self,
@@ -624,16 +761,24 @@ class PipelineRunner:
         if not company_name:
             return None
 
+        # Collect writer sections
+        writer_sections = getattr(state, 'writer_sections', {})
+        sections_completed = get_writer_section_keys() if writer_sections else []
+
+        # Get intro section data for lead score
+        intro_section = writer_sections.get("intro", {})
+
         dossier = self.repo.create_dossier(Dossier(
             pipeline_run_id=state.pipeline_run_id,
             client_id=state.client.id,
             company_name=company_name,
             company_domain=state.get_variable("domain"),
-            lead_score=state.step_outputs.get("9-dossier-plan", {}).get("lead_score"),
-            timing_urgency=state.get_variable("timing_urgency"),
+            lead_score=intro_section.get("lead_score") or state.step_outputs.get("9-dossier-plan", {}).get("lead_score"),
+            timing_urgency=intro_section.get("timing_urgency") or state.get_variable("timing_urgency"),
             primary_signal=state.get_variable("primary_signal"),
             status="ready",
-            sections_completed=list(state.step_outputs.keys()),
+            sections_completed=sections_completed,
+            sections=writer_sections,  # Store all writer outputs
         ))
 
         state.dossier = dossier
