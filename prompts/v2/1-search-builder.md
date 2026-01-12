@@ -41,22 +41,27 @@ You MUST try DIFFERENT:
 
 ## Signal Priority (from ICP)
 
-**Tier 1 - Hot Signals (25+ points):**
-- EPCM contract awards
-- Utility interconnection secured
-- Federal mine/project approvals
-- Building permits filed
+**CRITICAL: Prioritize EARLY signals. Late-stage signals (permits filed, EPCM awarded) mean contractors are already selected.**
 
-**Tier 2 - Warm Signals (15-20 points):**
-- Land acquisitions
-- Environmental approvals (EIS)
-- Feasibility studies completed
-- Pre-construction contracts
+**Tier 1 - HOT / EARLY Signals (23-25 points) - PRIORITIZE THESE:**
+- Site selection announced - Project location chosen, no contractors yet
+- RFP issued for design/build - Actively evaluating contractors
+- Land acquisition - Real commitment, design phase starting
+- Feasibility study completed - Project greenlit, procurement starting
 
-**Tier 3 - Planning Signals (10-15 points):**
-- Zoning approvals
-- Power allocation requests
-- EPCM firm hired
+**Tier 2 - WARM Signals (18-21 points):**
+- Environmental approval (EIS) - Project real, design starting
+- Power purchase agreement - Data centers: project is committed
+- Board/capital approval announced - Budget finalized
+- Rezoning approved - Site preparation
+
+**Tier 3 - LATE Signals (10-15 points) - Less valuable:**
+- Pre-construction contract - Getting late
+- Utility interconnection - Late stage
+- Building permit filed - TOO LATE, GC selected
+- EPCM award - TOO LATE, subs being finalized
+
+**SEARCH PRIORITY: Look for EARLY signals first (site selection, land deals, RFPs), NOT late signals.**
 
 ## Query Construction
 
@@ -65,10 +70,11 @@ For each query:
 2. Include year (2025, 2026) for recency
 3. Use quotation marks for exact phrases
 
-Example patterns:
-- "EPCM contract awarded" data center Virginia 2025
-- "building permit" industrial facility Texas 100000 sq ft
-- "mining project" approved construction Ontario 2026
+Example patterns (prioritize early signals):
+- "site selection" data center Virginia 2025 2026
+- "land acquisition" data center Texas 100+ acres
+- "feasibility study" data center expansion 2026
+- "RFP" OR "request for proposals" construction data center
 
 ## Output Format
 

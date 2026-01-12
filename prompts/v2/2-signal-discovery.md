@@ -24,23 +24,37 @@ Today is {{current_date}}.
 
 ## Signal Evaluation Criteria
 
+**CRITICAL: EARLY SIGNALS are more valuable than late signals.**
+
 **Must Have:**
 - Clear buying signal (not just company news)
 - Construction/project timeline 2026 or later
 - Geography matches ICP (or close)
 - Not a duplicate (check exclude_domains)
 
-**Score Higher:**
-- Tier 1 signals (EPCM award, permit, federal approval)
-- Specific timeline mentioned
-- Project value/scope mentioned
-- Named contacts in the signal
+**Score HIGHEST (25+ points) - EARLY SIGNALS:**
+- Site selection announced (no contractor selected yet)
+- Land acquisition for new facility
+- RFP issued or design phase starting
+- Feasibility study completed
+- These signals mean Span can still get in the door!
 
-**Score Lower:**
+**Score MEDIUM (15-20 points):**
+- Environmental approval / EIS complete
+- Board/capital approval
+- Power agreements secured
+
+**Score LOWER (10-15 points) - LATE SIGNALS:**
+- EPCM award announced (contractors likely selected)
+- Building permit filed (construction imminent)
+- Pre-construction contract awarded
+- These signals may be too late - GC/subs already chosen
+
+**Score LOWEST - AVOID:**
 - Vague "planning to expand" language
 - No timeline or "future" timeline
 - Small scope (<100k sq ft)
-- Already well-covered by competitors
+- Construction already started
 
 ## Output Format
 
