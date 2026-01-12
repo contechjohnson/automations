@@ -78,19 +78,31 @@ def load_prompt_content(prompt_id: str) -> str:
 
 def parse_json_output(raw_output: str) -> Optional[Dict[str, Any]]:
     """Extract and parse JSON from LLM output"""
-    # Try direct parse first
+    if not raw_output:
+        print("DEBUG parse_json_output: received empty/None input")
+        return None
+
+    print(f"DEBUG parse_json_output: input length={len(raw_output)}, starts_with='{raw_output[:100]}'")
+
+    # Try direct parse first (with strip to remove whitespace)
     try:
-        return json.loads(raw_output)
-    except json.JSONDecodeError:
-        pass
+        result = json.loads(raw_output.strip())
+        print(f"DEBUG parse_json_output: direct parse SUCCESS, keys={list(result.keys()) if isinstance(result, dict) else 'list'}")
+        return result
+    except json.JSONDecodeError as e:
+        print(f"DEBUG parse_json_output: direct parse failed: {e}")
 
     # Try to find JSON in markdown code blocks
     json_pattern = r'```(?:json)?\s*([\s\S]*?)```'
     matches = re.findall(json_pattern, raw_output)
-    for match in matches:
+    print(f"DEBUG parse_json_output: found {len(matches)} markdown code blocks")
+    for i, match in enumerate(matches):
         try:
-            return json.loads(match.strip())
-        except json.JSONDecodeError:
+            result = json.loads(match.strip())
+            print(f"DEBUG parse_json_output: code block {i} parse SUCCESS")
+            return result
+        except json.JSONDecodeError as e:
+            print(f"DEBUG parse_json_output: code block {i} parse failed: {e}")
             continue
 
     # Try to find JSON object/array anywhere
@@ -98,10 +110,14 @@ def parse_json_output(raw_output: str) -> Optional[Dict[str, Any]]:
         match = re.search(pattern, raw_output)
         if match:
             try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
+                result = json.loads(match.group())
+                print(f"DEBUG parse_json_output: regex pattern '{pattern[:10]}' SUCCESS")
+                return result
+            except json.JSONDecodeError as e:
+                print(f"DEBUG parse_json_output: regex pattern '{pattern[:10]}' failed: {e}")
                 continue
 
+    print(f"DEBUG parse_json_output: ALL methods failed, returning None. Output ends with: '{raw_output[-200:]}'")
     return None
 
 
