@@ -1,5 +1,11 @@
 """
 Step executor - executes individual pipeline steps with I/O capture
+
+Key Architecture:
+- Claims extraction is an LLM step (same prompt for all extractors)
+- After narrative-producing steps, we run claims-extraction.md
+- Claims merge happens at 7b-insight using claims-merge.md
+- Context packs use context-pack.md
 """
 import os
 import re
@@ -92,7 +98,7 @@ def extract_claims_from_output(
     step_run_id: str,
     source_step: str
 ) -> List[Claim]:
-    """Extract claims from step output"""
+    """Extract claims from LLM claims extraction output (JSON format)"""
     claims = []
 
     # Look for claims array in output
@@ -124,6 +130,101 @@ def extract_claims_from_output(
     return claims
 
 
+async def run_claims_extraction_llm(
+    narrative: str,
+    source_step: str,
+    company_name: str,
+    model: str = "gpt-4.1"
+) -> Optional[Dict[str, Any]]:
+    """
+    Run the claims extraction LLM step on narrative output.
+    This is THE post-processing step that converts narrative to atomic claims.
+    """
+    from workers.ai import ai
+
+    # Load claims extraction prompt
+    prompt_template = load_prompt_content("claims-extraction")
+
+    # Interpolate variables
+    variables = {
+        "source_step": source_step,
+        "company_name": company_name,
+        "narrative": narrative,
+    }
+    prompt = interpolate_prompt(prompt_template, variables)
+
+    # Run LLM
+    result = ai(prompt, model=model, temperature=0.3)  # Lower temp for structured output
+
+    # Parse JSON output
+    return parse_json_output(result)
+
+
+async def run_claims_merge_llm(
+    all_claims: List[Dict[str, Any]],
+    company_name: str,
+    pipeline_run_id: str,
+    model: str = "gpt-4.1"
+) -> Optional[Dict[str, Any]]:
+    """
+    Run the claims merge LLM step at 7b-insight.
+    This is the single reconciliation point for all accumulated claims.
+    """
+    from workers.ai import ai
+
+    # Load claims merge prompt
+    prompt_template = load_prompt_content("claims-merge")
+
+    # Interpolate variables
+    variables = {
+        "company_name": company_name,
+        "pipeline_run_id": pipeline_run_id,
+        "all_claims": json.dumps(all_claims, indent=2),
+        "input_claims_count": len(all_claims),
+    }
+    prompt = interpolate_prompt(prompt_template, variables)
+
+    # Run LLM
+    result = ai(prompt, model=model, temperature=0.3)
+
+    # Parse JSON output
+    return parse_json_output(result)
+
+
+async def run_context_pack_llm(
+    merged_claims: List[Dict[str, Any]],
+    company_name: str,
+    pack_type: str,
+    target_step: str,
+    model: str = "gpt-4.1"
+) -> Optional[Dict[str, Any]]:
+    """
+    Run the context pack generation LLM step.
+    Creates a focused context summary from claims for downstream steps.
+    """
+    from workers.ai import ai
+
+    # Load context pack prompt
+    prompt_template = load_prompt_content("context-pack")
+
+    # Interpolate variables
+    variables = {
+        "company_name": company_name,
+        "pack_type": pack_type,
+        "target_step": target_step,
+        "merged_claims": json.dumps(merged_claims, indent=2),
+        "claims_count": len(merged_claims),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    prompt = interpolate_prompt(prompt_template, variables)
+
+    # Run LLM
+    result = ai(prompt, model=model, temperature=0.5)
+
+    # Parse JSON output
+    return parse_json_output(result)
+
+
 class StepExecutor:
     """Executes individual pipeline steps"""
 
@@ -139,7 +240,7 @@ class StepExecutor:
         Execute a single step and return:
         - StepRun record
         - Parsed output (if any)
-        - Extracted claims (if produces_claims)
+        - Extracted claims (if produces_claims via LLM extraction)
         """
         step_id = step_config.prompt_id
         start_time = time.time()
@@ -190,12 +291,40 @@ class StepExecutor:
             else:
                 raise ValueError(f"Unknown execution mode: {step_config.execution_mode}")
 
-            # Parse output
+            # Parse output - may be JSON or narrative
             parsed_output = parse_json_output(raw_output) if raw_output else None
 
-            # Extract claims if applicable
+            # Extract claims via LLM if this step produces claims
             claims = []
-            if step_config.produces_claims and parsed_output:
+            if step_config.produces_claims and step_config.extract_claims_after:
+                # Run claims extraction LLM on the narrative output
+                company_name = state.get_variable("company_name") or "Unknown"
+                narrative = raw_output or ""
+
+                print(f"Running claims extraction LLM for {step_id}...")
+                extraction_result = await run_claims_extraction_llm(
+                    narrative=narrative,
+                    source_step=step_id,
+                    company_name=company_name,
+                    model="gpt-4.1"  # Use 4.1 for extraction
+                )
+
+                if extraction_result:
+                    claims = extract_claims_from_output(
+                        extraction_result,
+                        state.pipeline_run_id,
+                        step_run.id,
+                        step_id
+                    )
+                    print(f"Extracted {len(claims)} claims from {step_id}")
+
+                    # Update parsed_output with extraction result for tracking
+                    if parsed_output is None:
+                        parsed_output = {}
+                    parsed_output["_claims_extraction"] = extraction_result.get("extraction_summary", {})
+
+            elif step_config.produces_claims and parsed_output:
+                # Fallback: Direct extraction from JSON output (legacy)
                 claims = extract_claims_from_output(
                     parsed_output,
                     state.pipeline_run_id,
@@ -230,6 +359,113 @@ class StepExecutor:
                 "completed_at": datetime.utcnow().isoformat(),
             })
             raise
+
+    async def execute_claims_merge(
+        self,
+        state: PipelineState,
+    ) -> Tuple[Optional[Dict[str, Any]], List[Claim]]:
+        """
+        Execute claims merge at the insight step.
+        This processes ALL accumulated claims into merged claims.
+        """
+        company_name = state.get_variable("company_name") or "Unknown"
+
+        # Get all accumulated claims as dicts
+        all_claims = [
+            {
+                "claim_id": c.claim_id,
+                "claim_type": c.claim_type.value if hasattr(c.claim_type, 'value') else c.claim_type,
+                "statement": c.statement,
+                "entities": c.entities,
+                "date_in_claim": c.date_in_claim,
+                "source_url": c.source_url,
+                "source_name": c.source_name,
+                "source_tier": c.source_tier.value if hasattr(c.source_tier, 'value') else c.source_tier,
+                "confidence": c.confidence.value if hasattr(c.confidence, 'value') else c.confidence,
+                "source_step": c.source_step,
+            }
+            for c in state.claims
+        ]
+
+        if not all_claims:
+            print("No claims to merge")
+            return None, []
+
+        print(f"Running claims merge LLM on {len(all_claims)} claims...")
+        merge_result = await run_claims_merge_llm(
+            all_claims=all_claims,
+            company_name=company_name,
+            pipeline_run_id=state.pipeline_run_id,
+            model="gpt-4.1"
+        )
+
+        if not merge_result:
+            print("Claims merge returned no result")
+            return None, []
+
+        # Extract merged claims
+        merged_claims = []
+        for mc in merge_result.get("merged_claims", []):
+            try:
+                claim = Claim(
+                    pipeline_run_id=state.pipeline_run_id,
+                    claim_id=mc.get("merged_claim_id", "M_000"),
+                    claim_type=ClaimType(mc.get("claim_type", "NOTE")),
+                    statement=mc.get("statement", "")[:500],
+                    entities=mc.get("entities", []),
+                    source_url=mc.get("sources", [{}])[0].get("url") if mc.get("sources") else None,
+                    source_name=mc.get("sources", [{}])[0].get("name", "Merged") if mc.get("sources") else "Merged",
+                    source_tier=SourceTier(mc.get("sources", [{}])[0].get("tier", "OTHER")) if mc.get("sources") else SourceTier.OTHER,
+                    confidence=Confidence(mc.get("confidence", "MEDIUM")),
+                    source_step="7b-insight",
+                    is_merged=True,
+                )
+                merged_claims.append(claim)
+            except Exception as e:
+                print(f"Warning: Failed to parse merged claim: {e}")
+                continue
+
+        print(f"Created {len(merged_claims)} merged claims")
+        return merge_result, merged_claims
+
+    async def generate_context_pack(
+        self,
+        state: PipelineState,
+        pack_type: str,
+        target_step: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate a context pack using LLM from current claims.
+        """
+        company_name = state.get_variable("company_name") or "Unknown"
+
+        # Get merged claims if available, else raw claims
+        claims_to_use = state.merged_claims if state.merged_claims else state.claims
+        claims_data = [
+            {
+                "claim_id": c.claim_id,
+                "claim_type": c.claim_type.value if hasattr(c.claim_type, 'value') else c.claim_type,
+                "statement": c.statement,
+                "entities": c.entities,
+                "confidence": c.confidence.value if hasattr(c.confidence, 'value') else c.confidence,
+            }
+            for c in claims_to_use
+        ]
+
+        if not claims_data:
+            print(f"No claims available for context pack {pack_type}")
+            return None
+
+        print(f"Generating context pack '{pack_type}' from {len(claims_data)} claims...")
+        pack_result = await run_context_pack_llm(
+            merged_claims=claims_data,
+            company_name=company_name,
+            pack_type=pack_type,
+            target_step=target_step,
+            model="gpt-4.1"
+        )
+
+        return pack_result
 
     async def _execute_sync(
         self,

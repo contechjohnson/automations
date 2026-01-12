@@ -319,6 +319,32 @@ class V2Repository:
         result = self.client.table("v2_contacts").update(updates).eq("id", contact_id).execute()
         return Contact(**result.data[0])
 
+    # ---------- Merge Stats ----------
+
+    def create_merge_stats(
+        self,
+        pipeline_run_id: str,
+        input_claims_count: int,
+        output_claims_count: int,
+        duplicates_merged: int,
+        conflicts_resolved: int
+    ) -> Dict[str, Any]:
+        """Create merge stats record"""
+        data = {
+            "pipeline_run_id": pipeline_run_id,
+            "input_claims_count": input_claims_count,
+            "output_claims_count": output_claims_count,
+            "duplicates_merged": duplicates_merged,
+            "conflicts_resolved": conflicts_resolved,
+        }
+        result = self.client.table("v2_merge_stats").insert(data).execute()
+        return result.data[0] if result.data else {}
+
+    def get_merge_stats(self, pipeline_run_id: str) -> Optional[Dict[str, Any]]:
+        """Get merge stats for a pipeline run"""
+        result = self.client.table("v2_merge_stats").select("*").eq("pipeline_run_id", pipeline_run_id).single().execute()
+        return result.data if result.data else None
+
     # ---------- Views / Aggregates ----------
 
     def get_pipeline_run_summary(self, run_id: str) -> Optional[Dict[str, Any]]:

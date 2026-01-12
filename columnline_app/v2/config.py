@@ -1,8 +1,15 @@
 """
 Pipeline configuration - step definitions, execution modes, stage ordering
+
+Architecture Notes:
+- Claims extraction is an LLM step (same prompt for all extractors)
+- Claims merge is an LLM step at 7b-insight
+- Context packs are LLM-orchestrated outputs
+- Copy generation runs PER CONTACT
+- Writer steps run in parallel
 """
 from typing import Dict, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -11,6 +18,7 @@ class ExecutionMode(str, Enum):
     AGENT = "agent"         # Agent SDK with tools
     BACKGROUND = "background"  # Deep research, returns response_id for polling
     ASYNC_POLL = "async_poll"  # Standard async with polling
+    PER_CONTACT = "per_contact"  # Runs once per contact discovered
 
 
 class Stage(str, Enum):
@@ -38,9 +46,14 @@ class StepConfig:
     parallel_group: Optional[str] = None  # Steps in same group run in parallel
     uses_tools: Optional[List[str]] = None
     timeout_seconds: int = 300
+    # Claims extraction config
+    extract_claims_after: bool = False  # If True, run claims extraction prompt after this step
+    # Per-contact config
+    per_contact: bool = False  # If True, runs once per contact
 
 
 # Pipeline step definitions
+# Note: extract_claims_after=True means we run claims-extraction.md after this step
 PIPELINE_STEPS: Dict[str, StepConfig] = {
     "1-search-builder": StepConfig(
         prompt_id="1-search-builder",
@@ -58,6 +71,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
         produces_claims=True,
+        extract_claims_after=True,  # LLM extracts claims from narrative
         uses_tools=["web_search"],
     ),
     "3-entity-research": StepConfig(
@@ -68,6 +82,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.BACKGROUND,
         model="o4-mini-deep-research",
         produces_claims=True,
+        extract_claims_after=True,  # LLM extracts claims from narrative
         produces_context_pack=True,
         context_pack_type="signal_to_entity",
         timeout_seconds=600,
@@ -80,6 +95,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.BACKGROUND,
         model="o4-mini-deep-research",
         produces_claims=True,
+        extract_claims_after=True,  # LLM extracts claims from narrative
         produces_context_pack=True,
         context_pack_type="entity_to_contacts",
         timeout_seconds=600,
@@ -92,6 +108,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
         produces_claims=True,
+        extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
     ),
@@ -103,6 +120,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
         produces_claims=True,
+        extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
     ),
@@ -114,6 +132,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
         produces_claims=True,
+        extract_claims_after=True,
         parallel_group="enrich",
         uses_tools=["firecrawl_scrape", "firecrawl_search"],
     ),
@@ -132,6 +151,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         step_order=6,
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
+        per_contact=True,  # Runs per contact discovered
         uses_tools=["web_search", "firecrawl_scrape"],
     ),
     "7a-copy": StepConfig(
@@ -141,6 +161,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         step_order=7,
         execution_mode=ExecutionMode.SYNC,
         model="gpt-4.1",
+        per_contact=True,  # Runs per contact for personalized copy
     ),
     "7.2-copy-client-override": StepConfig(
         prompt_id="7.2-copy-client-override",
@@ -149,16 +170,17 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         step_order=7,
         execution_mode=ExecutionMode.SYNC,
         model="gpt-4.1-mini",
+        per_contact=True,  # Runs per contact
     ),
+    # Claims merge step - processes ALL accumulated claims
     "7b-insight": StepConfig(
         prompt_id="7b-insight",
-        name="Insight Generation",
+        name="Claims Merge & Insight",
         stage=Stage.INSIGHT,
         step_order=7,
         execution_mode=ExecutionMode.SYNC,
         model="gpt-4.1",
-        produces_claims=True,
-        merges_claims=True,
+        merges_claims=True,  # This is the merge point
         produces_context_pack=True,
         context_pack_type="contacts_to_enrichment",
     ),
@@ -169,6 +191,8 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         step_order=8,
         execution_mode=ExecutionMode.AGENT,
         model="gpt-4.1",
+        produces_claims=True,
+        extract_claims_after=True,
         uses_tools=["firecrawl_scrape"],
     ),
     "9-dossier-plan": StepConfig(

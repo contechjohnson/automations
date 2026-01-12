@@ -66,17 +66,28 @@ def render_pipeline_page():
         if st.button("🚀 Start Pipeline", type="primary"):
             if selected_client and seed_company:
                 client_id = client_options[selected_client]
-                from columnline_app.v2.db.models import PipelineRun
+                import httpx
 
-                run = repo.create_pipeline_run(
-                    PipelineRun(
-                        client_id=client_id,
-                        seed={"company_name": seed_company, "hint": seed_company},
-                        status=PipelineStatus.PENDING,
-                    )
-                )
-                st.success(f"Pipeline started! Run ID: {run.id}")
-                st.rerun()
+                # Start pipeline via API (triggers background execution)
+                API_URL = os.environ.get("API_URL", "https://api.columnline.dev")
+                try:
+                    with httpx.Client(timeout=30.0) as client:
+                        response = client.post(
+                            f"{API_URL}/v2/pipeline/start",
+                            json={
+                                "client_id": client_id,
+                                "seed": {"company_name": seed_company, "hint": seed_company},
+                                "config": {}
+                            }
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            st.success(f"Pipeline started! Run ID: {data.get('id', 'unknown')}")
+                            st.rerun()
+                        else:
+                            st.error(f"API error: {response.status_code} - {response.text}")
+                except Exception as e:
+                    st.error(f"Failed to start pipeline: {e}")
             else:
                 st.error("Please select a client and enter a seed")
 

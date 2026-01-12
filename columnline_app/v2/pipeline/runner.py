@@ -210,6 +210,16 @@ class PipelineRunner:
             await self._execute_contact_enrichment(step_config, state, pipeline_run_id)
             return
 
+        # Special handling for copy generation (runs per contact)
+        if step_config.per_contact and step_id in ["7a-copy", "7.2-copy-client-override"]:
+            await self._execute_per_contact_copy(step_config, state, pipeline_run_id)
+            return
+
+        # Special handling for claims merge at insight step
+        if step_config.merges_claims and step_id == "7b-insight":
+            await self._execute_claims_merge(step_config, state, pipeline_run_id)
+            return
+
         # Execute step
         step_run, output, claims = await self.executor.execute_step(step_config, state)
 
@@ -222,19 +232,162 @@ class PipelineRunner:
             saved_claims = self.repo.create_claims_batch(claims)
             state.add_claims(saved_claims)
 
-        # Create context pack if applicable
+        # Create context pack via LLM if applicable
         if step_config.produces_context_pack and step_config.context_pack_type:
-            pack_data = self._build_context_pack(step_config.context_pack_type, state, output)
-            pack = self.repo.create_context_pack(ContextPack(
-                pipeline_run_id=pipeline_run_id,
-                step_run_id=step_run.id,
-                pack_type=step_config.context_pack_type,
-                pack_data=pack_data,
-                anchor_claim_ids=[c.claim_id for c in claims] if claims else [],
-            ))
-            state.add_context_pack(pack)
+            # Use LLM-generated context pack
+            pack_data = await self.executor.generate_context_pack(
+                state,
+                step_config.context_pack_type,
+                self._get_next_step(step_id)
+            )
+            if pack_data:
+                pack = self.repo.create_context_pack(ContextPack(
+                    pipeline_run_id=pipeline_run_id,
+                    step_run_id=step_run.id,
+                    pack_type=step_config.context_pack_type,
+                    pack_data=pack_data,
+                    anchor_claim_ids=pack_data.get("anchor_claim_ids", []),
+                ))
+                state.add_context_pack(pack)
+
+        # Mark step completed
+        state.steps_completed.append(step_id)
 
         # Update pipeline run
+        self.repo.update_pipeline_run(pipeline_run_id, {
+            "steps_completed": state.steps_completed,
+        })
+
+    def _get_next_step(self, current_step: str) -> str:
+        """Get the next step in the pipeline for context pack targeting"""
+        step_order = list(PIPELINE_STEPS.keys())
+        try:
+            idx = step_order.index(current_step)
+            if idx + 1 < len(step_order):
+                return step_order[idx + 1]
+        except ValueError:
+            pass
+        return "next"
+
+    async def _execute_claims_merge(
+        self,
+        step_config: StepConfig,
+        state: PipelineState,
+        pipeline_run_id: str
+    ):
+        """Execute claims merge at the insight step"""
+        step_id = step_config.prompt_id
+        print(f"Executing claims merge at {step_id}...")
+
+        # Run claims merge LLM
+        merge_result, merged_claims = await self.executor.execute_claims_merge(state)
+
+        if merge_result:
+            state.add_step_output(step_id, merge_result)
+
+            # Store merged claims
+            if merged_claims:
+                saved_claims = self.repo.create_claims_batch(merged_claims)
+                state.merged_claims = saved_claims
+
+            # Store merge stats
+            merge_stats = merge_result.get("merge_stats", {})
+            if merge_stats:
+                self.repo.create_merge_stats(
+                    pipeline_run_id=pipeline_run_id,
+                    input_claims_count=merge_stats.get("input_claims", 0),
+                    output_claims_count=merge_stats.get("output_claims", 0),
+                    duplicates_merged=merge_stats.get("duplicates_merged", 0),
+                    conflicts_resolved=merge_stats.get("conflicts_resolved", 0),
+                )
+
+        # Generate context pack after merge
+        if step_config.produces_context_pack and step_config.context_pack_type:
+            pack_data = await self.executor.generate_context_pack(
+                state,
+                step_config.context_pack_type,
+                "writers"
+            )
+            if pack_data:
+                pack = self.repo.create_context_pack(ContextPack(
+                    pipeline_run_id=pipeline_run_id,
+                    pack_type=step_config.context_pack_type,
+                    pack_data=pack_data,
+                    anchor_claim_ids=pack_data.get("anchor_claim_ids", []),
+                ))
+                state.add_context_pack(pack)
+
+        state.steps_completed.append(step_id)
+        self.repo.update_pipeline_run(pipeline_run_id, {
+            "steps_completed": state.steps_completed,
+        })
+
+    async def _execute_per_contact_copy(
+        self,
+        step_config: StepConfig,
+        state: PipelineState,
+        pipeline_run_id: str
+    ):
+        """Execute copy generation for each contact"""
+        step_id = step_config.prompt_id
+        print(f"Executing per-contact copy at {step_id}...")
+
+        # Get contacts from state
+        contacts = state.contacts
+        if not contacts:
+            print("No contacts for copy generation")
+            state.steps_completed.append(step_id)
+            return
+
+        # Limit concurrent copy generations
+        max_concurrent = 5
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def generate_copy_for_contact(contact):
+            async with semaphore:
+                # Build contact-specific state
+                contact_vars = {
+                    "contact_first_name": contact.first_name,
+                    "contact_last_name": contact.last_name,
+                    "contact_name": f"{contact.first_name} {contact.last_name}",
+                    "contact_title": contact.title or "",
+                    "contact_org": contact.organization or "",
+                    "contact_bio": contact.bio or "",
+                    "contact_why_they_matter": contact.why_they_matter or "",
+                }
+                contact_state = PipelineState(
+                    pipeline_run_id=state.pipeline_run_id,
+                    client=state.client,
+                    seed={**state.seed, **contact_vars},
+                    step_outputs=state.step_outputs.copy(),
+                    claims=state.claims.copy(),
+                    merged_claims=state.merged_claims.copy(),
+                    context_packs=state.context_packs.copy(),
+                )
+
+                try:
+                    step_run, output, _ = await self.executor.execute_step(
+                        step_config, contact_state
+                    )
+
+                    # Update contact with generated copy
+                    if output:
+                        contact.email_copy = output.get("email_copy", contact.email_copy)
+                        contact.linkedin_copy = output.get("linkedin_copy", contact.linkedin_copy)
+                        # Save updated contact
+                        self.repo.update_contact(contact.id, {
+                            "email_copy": contact.email_copy,
+                            "linkedin_copy": contact.linkedin_copy,
+                        })
+
+                except Exception as e:
+                    print(f"Warning: Copy generation failed for {contact.first_name}: {e}")
+
+        # Run copy generation for all contacts in parallel
+        tasks = [generate_copy_for_contact(c) for c in contacts[:15]]  # Cap at 15
+        await asyncio.gather(*tasks)
+
+        state.steps_completed.append(step_id)
         self.repo.update_pipeline_run(pipeline_run_id, {
             "steps_completed": state.steps_completed,
         })
