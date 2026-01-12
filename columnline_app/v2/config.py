@@ -88,7 +88,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,  # LLM extracts claims from narrative
         produces_context_pack=True,
         context_pack_type="signal_to_entity",
-        timeout_seconds=600,
+        timeout_seconds=900,  # 15 min - deep research can take time
     ),
     "4-contact-discovery": StepConfig(
         prompt_id="4-contact-discovery",
@@ -101,7 +101,7 @@ PIPELINE_STEPS: Dict[str, StepConfig] = {
         extract_claims_after=True,  # LLM extracts claims from narrative
         produces_context_pack=True,
         context_pack_type="entity_to_contacts",
-        timeout_seconds=600,
+        timeout_seconds=900,  # 15 min - deep research can take time
     ),
     "5a-enrich-lead": StepConfig(
         prompt_id="5a-enrich-lead",
