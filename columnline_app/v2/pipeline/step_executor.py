@@ -197,11 +197,22 @@ async def run_claims_merge_llm(
     }
     prompt = interpolate_prompt(prompt_template, variables)
 
+    print(f"Claims merge prompt length: {len(prompt)} chars for {len(all_claims)} claims")
+
     # Run LLM
     result = ai(prompt, model=model, temperature=0.3)
 
+    print(f"Claims merge raw result length: {len(result) if result else 0} chars")
+    if result:
+        print(f"Claims merge result preview: {result[:500]}...")
+
     # Parse JSON output
-    return parse_json_output(result)
+    parsed = parse_json_output(result)
+    if parsed is None and result:
+        print(f"WARNING: Failed to parse claims merge JSON. Result starts with: {result[:300]}")
+    elif parsed:
+        print(f"Claims merge parsed keys: {list(parsed.keys())}")
+    return parsed
 
 
 async def run_context_pack_llm(
