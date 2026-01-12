@@ -73,48 +73,56 @@ class CreatePromptRequest(BaseModel):
 @router.post("/prompts")
 async def create_prompt(request: CreatePromptRequest):
     """Create a new prompt with optional initial content"""
-    repo = get_repo()
+    try:
+        repo = get_repo()
 
-    # Check if prompt already exists
-    existing = repo.get_prompt(request.prompt_id)
-    if existing:
-        raise HTTPException(status_code=400, detail=f"Prompt {request.prompt_id} already exists")
+        # Check if prompt already exists
+        existing = repo.get_prompt(request.prompt_id)
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Prompt {request.prompt_id} already exists")
 
-    # Try to load content from file if not provided
-    content = request.content
-    if not content:
-        prompt_file = f"prompts/v2/{request.prompt_id}.md"
-        if os.path.exists(prompt_file):
-            with open(prompt_file, "r") as f:
-                content = f.read()
-        else:
-            content = f"# {request.name}\n\nPrompt content here..."
+        # Try to load content from file if not provided
+        content = request.content
+        if not content:
+            prompt_file = f"prompts/v2/{request.prompt_id}.md"
+            if os.path.exists(prompt_file):
+                with open(prompt_file, "r") as f:
+                    content = f.read()
+            else:
+                content = f"# {request.name}\n\nPrompt content here..."
 
-    # Insert into v2_prompts table
-    prompt_data = {
-        "prompt_id": request.prompt_id,
-        "name": request.name,
-        "description": request.description,
-        "current_version": 1,
-        "is_active": True,
-    }
-    result = repo.client.table("v2_prompts").insert(prompt_data).execute()
+        # Insert into v2_prompts table
+        prompt_data = {
+            "prompt_id": request.prompt_id,
+            "name": request.name,
+            "description": request.description,
+            "current_version": 1,
+            "is_active": True,
+        }
+        result = repo.client.table("v2_prompts").insert(prompt_data).execute()
 
-    # Create initial version
-    version_data = {
-        "prompt_id": request.prompt_id,
-        "version_number": 1,
-        "content": content,
-        "change_notes": "Initial version",
-        "created_by": "api",
-    }
-    repo.client.table("v2_prompt_versions").insert(version_data).execute()
+        # Create initial version
+        version_data = {
+            "prompt_id": request.prompt_id,
+            "version_number": 1,
+            "content": content,
+            "change_notes": "Initial version",
+            "created_by": "api",
+        }
+        repo.client.table("v2_prompt_versions").insert(version_data).execute()
 
-    return {
-        "prompt_id": request.prompt_id,
-        "message": "Prompt created successfully",
-        "content_loaded_from_file": request.content is None
-    }
+        return {
+            "prompt_id": request.prompt_id,
+            "message": "Prompt created successfully",
+            "content_loaded_from_file": request.content is None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"Error creating prompt: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/prompts")
