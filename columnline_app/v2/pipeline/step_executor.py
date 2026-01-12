@@ -507,18 +507,21 @@ class StepExecutor:
     ) -> Tuple[str, int, int]:
         """Execute agent with tools - falls back to sync call if agents SDK unavailable"""
         try:
-            from workers.agent import run_firecrawl_agent, run_research_agent, run_full_agent
+            from workers.agent import run_agent_async
 
-            # Choose agent based on tools
+            # Choose agent type based on tools
             tools = config.uses_tools or []
 
             if "firecrawl_scrape" in tools or "firecrawl_search" in tools:
                 if "web_search" in tools:
-                    result = run_full_agent(prompt, model=config.model)
+                    agent_type = "full"
                 else:
-                    result = run_firecrawl_agent(prompt, model=config.model)
+                    agent_type = "firecrawl"
             else:
-                result = run_research_agent(prompt, model=config.model)
+                agent_type = "research"
+
+            # Use async agent function directly (avoids asyncio.run conflict)
+            result = await run_agent_async(prompt, agent_type=agent_type, model=config.model)
 
             # Agents return the final output
             output = result.get("output", result) if isinstance(result, dict) else str(result)
