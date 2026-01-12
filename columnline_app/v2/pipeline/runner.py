@@ -45,7 +45,7 @@ class PipelineRunner:
         config: Optional[Dict[str, Any]] = None
     ) -> PipelineRun:
         """
-        Run the full pipeline for a client.
+        Run the full pipeline for a client (creates new pipeline run).
 
         Args:
             client_id: The client to run for
@@ -71,6 +71,66 @@ class PipelineRunner:
             started_at=datetime.utcnow(),
         ))
 
+        return await self._execute_pipeline(pipeline_run, client, seed, config)
+
+    async def run_pipeline_with_id(
+        self,
+        pipeline_run_id: str,
+        client_id: str,
+        seed: Dict[str, Any],
+        config: Optional[Dict[str, Any]] = None
+    ) -> PipelineRun:
+        """
+        Run the pipeline using an existing pipeline run ID.
+
+        Args:
+            pipeline_run_id: Existing pipeline run to update
+            client_id: The client to run for
+            seed: Seed data (company name, domain, etc.)
+            config: Optional runtime configuration overrides
+
+        Returns:
+            The completed PipelineRun
+        """
+        config = config or {}
+
+        # Get client
+        client = self.repo.get_client(client_id)
+        if not client:
+            raise ValueError(f"Client not found: {client_id}")
+
+        # Get existing pipeline run
+        pipeline_run = self.repo.get_pipeline_run(pipeline_run_id)
+        if not pipeline_run:
+            raise ValueError(f"Pipeline run not found: {pipeline_run_id}")
+
+        # Update to running status
+        pipeline_run = self.repo.update_pipeline_run(pipeline_run_id, {
+            "status": PipelineStatus.RUNNING.value,
+            "started_at": datetime.utcnow().isoformat(),
+        })
+
+        return await self._execute_pipeline(pipeline_run, client, seed, config)
+
+    async def _execute_pipeline(
+        self,
+        pipeline_run: PipelineRun,
+        client,
+        seed: Dict[str, Any],
+        config: Dict[str, Any]
+    ) -> PipelineRun:
+        """
+        Execute the pipeline stages.
+
+        Args:
+            pipeline_run: The pipeline run record
+            client: The client config
+            seed: Seed data
+            config: Runtime configuration
+
+        Returns:
+            The completed PipelineRun
+        """
         # Initialize state
         state = PipelineState(
             pipeline_run_id=pipeline_run.id,

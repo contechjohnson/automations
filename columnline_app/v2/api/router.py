@@ -229,17 +229,27 @@ async def start_pipeline(request: StartPipelineRequest, background_tasks: Backgr
         status=PipelineStatus.PENDING,
     ))
 
-    # Run in background
-    async def run_in_background():
+    # Run in background using sync wrapper
+    def run_in_background():
         try:
             runner = PipelineRunner()
-            await runner.run_pipeline(
+            import asyncio
+            asyncio.run(runner.run_pipeline_with_id(
+                pipeline_run.id,
                 request.client_id,
                 request.seed,
                 request.config
-            )
+            ))
         except Exception as e:
+            import traceback
             print(f"Pipeline failed: {e}")
+            print(traceback.format_exc())
+            # Update run to failed status
+            repo.update_pipeline_run(pipeline_run.id, {
+                "status": PipelineStatus.FAILED.value,
+                "error_message": str(e),
+                "completed_at": datetime.utcnow().isoformat(),
+            })
 
     background_tasks.add_task(run_in_background)
 
