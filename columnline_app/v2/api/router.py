@@ -92,15 +92,18 @@ async def create_prompt(request: CreatePromptRequest):
                 content = f"# {request.name}\n\nPrompt content here..."
 
         # Insert into v2_prompts table
-        # Get stage from config if available
+        # Get stage and other config from config if available
         from ..config import PIPELINE_STEPS
         step_config = PIPELINE_STEPS.get(request.prompt_id)
-        stage = step_config.stage.value if step_config else "FINAL"
 
         prompt_data = {
             "prompt_id": request.prompt_id,
             "name": request.name,
-            "stage": stage,
+            "stage": step_config.stage.value if step_config else "FINAL",
+            "step_order": step_config.step_order if step_config else 99,
+            "model": step_config.model if step_config else "gpt-4.1",
+            "execution_mode": step_config.execution_mode.value if step_config else "sync",
+            "timeout_seconds": step_config.timeout_seconds if step_config else 300,
             "current_version": 1,
             "is_active": True,
         }
