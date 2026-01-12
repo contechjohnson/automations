@@ -2,6 +2,7 @@
 Automations API - FastAPI endpoints with full logging
 """
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -11,6 +12,19 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 app = FastAPI(title="Automations API")
+
+# CORS middleware for dashboard
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all for dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include v2 router
+from columnline_app.v2.api.router import router as v2_router
+app.include_router(v2_router)
 
 
 class PromptRequest(BaseModel):

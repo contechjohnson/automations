@@ -559,3 +559,46 @@ curl -X POST "http://localhost:8000/test/prompt" ...
 ssh root@64.225.120.95
 # Password in 1Password or directives/automations-droplet.md
 ```
+
+---
+
+## Columnline Migration (Make.com → Production)
+
+**Status:** Phase 1 Complete - Documentation generated
+
+The `columnline_app/` folder contains work to migrate Columnline's dossier pipeline from Make.com visual workflows to production Python code.
+
+### Key Resources
+
+| Resource | Path |
+|----------|------|
+| **Skill** | `.claude/skills/make_migration/` |
+| **Raw exports** | `columnline_app/api_migration/make_scenarios_and_csvs/` |
+| **Documentation** | `columnline_app/api_migration/docs/` |
+| **Migration plan** | `~/.claude/plans/synthetic-finding-perlis.md` |
+
+### What's Been Documented
+
+- **14 Make.com blueprints** - Main pipeline, setup phases, research steps, writers
+- **6 CSV data sheets** - Client configs, prompts, contacts, control panel
+
+### Key Patterns Discovered
+
+1. **Async polling** - Make.com uses `Repeater → Sleep → HTTP GET → Router` for async ops
+2. **Claims system** - Atomic fact extraction → merge at 07B_INSIGHT → context packs
+3. **Parallel writers** - 6 section writers run via `CallSubscenario`
+4. **Model usage** - `gpt-4.1` for sync, `o4-mini-deep-research` for async
+
+### Migration Phases
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1 | Complete | Document Make.com workflows |
+| 2 | Pending | Create v2 Supabase schema |
+| 3 | Pending | Build pipeline runner |
+| 4 | Pending | Build prompt admin dashboard |
+| 5 | Pending | Migrate steps to Python |
+| 6 | Pending | Integrate with Next.js |
+| 7 | Pending | Testing & cutover |
+
+When working on Columnline migration, use the `make_migration` skill for full context.
