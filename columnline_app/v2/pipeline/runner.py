@@ -327,33 +327,36 @@ class PipelineRunner:
         self,
         pack_type: str,
         state: PipelineState,
-        latest_output: Dict[str, Any]
+        latest_output: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Build a context pack from state"""
+        # Handle None output gracefully
+        output = latest_output or {}
+
         if pack_type == "signal_to_entity":
             return {
-                "signal": latest_output.get("primary_signal"),
-                "company_name": latest_output.get("company_name"),
-                "domain": latest_output.get("domain"),
-                "signal_summary": latest_output.get("signal_summary"),
-                "key_facts": latest_output.get("key_facts", []),
+                "signal": output.get("primary_signal") or state.get_variable("signal_type"),
+                "company_name": output.get("company_name") or state.get_variable("company_name"),
+                "domain": output.get("domain") or state.get_variable("company_domain"),
+                "signal_summary": output.get("signal_summary") or state.get_variable("signal_summary"),
+                "key_facts": output.get("key_facts", []),
             }
         elif pack_type == "entity_to_contacts":
             return {
-                "company_name": latest_output.get("company_name") or state.get_variable("company_name"),
-                "domain": latest_output.get("domain") or state.get_variable("domain"),
-                "key_contacts": latest_output.get("contacts", []),
-                "corporate_structure": latest_output.get("corporate_structure"),
-                "partner_organizations": latest_output.get("partner_organizations", []),
+                "company_name": output.get("company_name") or state.get_variable("company_name"),
+                "domain": output.get("domain") or state.get_variable("company_domain"),
+                "key_contacts": output.get("contacts", []),
+                "corporate_structure": output.get("corporate_structure"),
+                "partner_organizations": output.get("partner_organizations", []),
             }
         elif pack_type == "contacts_to_enrichment":
             return {
                 "company_name": state.get_variable("company_name"),
                 "merged_claims_count": len(state.merged_claims),
                 "contacts_count": len(state.contacts),
-                "insights": latest_output.get("insights", {}),
+                "insights": output.get("insights", {}),
             }
-        return latest_output
+        return output or {}
 
     async def _create_dossier(self, state: PipelineState) -> Optional[Dossier]:
         """Create dossier from pipeline state"""
