@@ -4,35 +4,26 @@ Execution Logs Page
 Simple table of all LLM calls with full I/O inspection.
 """
 import streamlit as st
-import httpx
 import os
+import sys
 from datetime import datetime
 
-API_URL = os.environ.get("API_URL", "https://api.columnline.dev")
+# Add project root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from columnline_app.v2.db.repository import V2Repository
 
 
 def get_logs(limit: int = 50):
-    """Fetch recent execution logs"""
+    """Fetch recent execution logs from local database"""
     try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(f"{API_URL}/logs", params={"limit": limit})
-            if response.status_code == 200:
-                return response.json().get("logs", [])
+        repo = V2Repository()
+        # Get from execution_logs table
+        result = repo.supabase.table("execution_logs").select("*").order("started_at", desc=True).limit(limit).execute()
+        return result.data if result.data else []
     except Exception as e:
         st.error(f"Failed to fetch logs: {e}")
     return []
-
-
-def get_log_detail(log_id: str):
-    """Fetch full log with I/O"""
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(f"{API_URL}/logs/{log_id}")
-            if response.status_code == 200:
-                return response.json()
-    except Exception as e:
-        st.error(f"Failed to fetch log: {e}")
-    return None
 
 
 def format_time(timestamp_str: str) -> str:
@@ -61,7 +52,7 @@ def render_logs_page():
     with col1:
         st.subheader("Execution Logs")
     with col2:
-        if st.button("🔄 Refresh"):
+        if st.button("🔄 Refresh", key="refresh_logs"):
             st.rerun()
 
     # Get logs
@@ -72,10 +63,10 @@ def render_logs_page():
         return
 
     # Display as table
-    for log in logs:
+    for i, log in enumerate(logs):
         status = log.get("status", "unknown")
         worker = log.get("worker_name", "unknown")
-        runtime = log.get("runtime_seconds", 0)
+        runtime = log.get("runtime_seconds") or 0
         started = format_time(log.get("started_at"))
 
         # Truncate worker name for display
@@ -84,10 +75,10 @@ def render_logs_page():
         header = f"{status_emoji(status)} **{worker_short}** | {started} | {runtime:.1f}s"
 
         with st.expander(header, expanded=False):
-            render_log_detail(log)
+            render_log_detail(log, i)
 
 
-def render_log_detail(log: dict):
+def render_log_detail(log: dict, index: int):
     """Render log detail with I/O"""
     col1, col2, col3 = st.columns(3)
 
@@ -96,39 +87,33 @@ def render_log_detail(log: dict):
     with col2:
         st.write(f"**Status:** {log.get('status', 'unknown')}")
     with col3:
-        st.write(f"**Duration:** {log.get('runtime_seconds', 0):.2f}s")
+        runtime = log.get('runtime_seconds') or 0
+        st.write(f"**Duration:** {runtime:.2f}s")
 
     # Tags
     tags = log.get("tags", [])
     if tags:
         st.write(f"**Tags:** {', '.join(tags)}")
 
-    # Full I/O (may need separate API call)
-    log_id = log.get("id")
-    if log_id:
-        detail = get_log_detail(log_id)
-        if detail:
-            col1, col2 = st.columns(2)
+    # Full I/O from the log record
+    col1, col2 = st.columns(2)
 
-            with col1:
-                st.markdown("**Input**")
-                input_data = detail.get("input", {})
-                if input_data:
-                    # Show truncated
-                    st.json(input_data)
-                else:
-                    st.info("No input recorded")
+    with col1:
+        st.markdown("**Input**")
+        input_data = log.get("input", {})
+        if input_data:
+            st.json(input_data)
+        else:
+            st.info("No input recorded")
 
-            with col2:
-                st.markdown("**Output**")
-                output_data = detail.get("output", {})
-                if output_data:
-                    st.json(output_data)
-                else:
-                    st.info("No output recorded")
+    with col2:
+        st.markdown("**Output**")
+        output_data = log.get("output", {})
+        if output_data:
+            st.json(output_data)
+        else:
+            st.info("No output recorded")
 
-            # Error if present
-            if detail.get("error_message"):
-                st.error(f"**Error:** {detail['error_message']}")
-    else:
-        st.info("No detail available")
+    # Error if present
+    if log.get("error_message"):
+        st.error(f"**Error:** {log['error_message']}")

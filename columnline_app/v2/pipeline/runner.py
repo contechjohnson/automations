@@ -270,8 +270,9 @@ class PipelineRunner:
                 state.add_context_pack(pack)
                 print(f"Added context pack '{pack_type}' to state")
 
-        # Mark step completed
-        state.steps_completed.append(step_id)
+        # Mark step completed (avoid duplicates)
+        if step_id not in state.steps_completed:
+            state.steps_completed.append(step_id)
 
         # Update pipeline run
         self.repo.update_pipeline_run(pipeline_run_id, {
@@ -394,7 +395,8 @@ class PipelineRunner:
                     ))
                     state.add_context_pack(pack)
 
-            state.steps_completed.append(step_id)
+            if step_id not in state.steps_completed:
+                state.steps_completed.append(step_id)
             self.repo.update_pipeline_run(pipeline_run_id, {
                 "steps_completed": state.steps_completed,
             })
@@ -534,8 +536,9 @@ class PipelineRunner:
 
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # Mark step completed
-            state.steps_completed.append(step_id)
+            # Mark step completed (avoid duplicates)
+            if step_id not in state.steps_completed:
+                state.steps_completed.append(step_id)
             self.repo.update_pipeline_run(pipeline_run_id, {
                 "steps_completed": state.steps_completed,
             })
@@ -568,7 +571,8 @@ class PipelineRunner:
         contacts = state.contacts
         if not contacts:
             print("No contacts for copy generation")
-            state.steps_completed.append(step_id)
+            if step_id not in state.steps_completed:
+                state.steps_completed.append(step_id)
             return
 
         # Limit concurrent copy generations
@@ -619,7 +623,8 @@ class PipelineRunner:
         tasks = [generate_copy_for_contact(c) for c in contacts[:15]]  # Cap at 15
         await asyncio.gather(*tasks)
 
-        state.steps_completed.append(step_id)
+        if step_id not in state.steps_completed:
+            state.steps_completed.append(step_id)
         self.repo.update_pipeline_run(pipeline_run_id, {
             "steps_completed": state.steps_completed,
         })
@@ -815,7 +820,8 @@ class PipelineRunner:
         await asyncio.gather(*tasks)
 
         print(f"Contact enrichment complete. {len(state.contacts)} contacts enriched.")
-        state.steps_completed.append(step_config.prompt_id)
+        if step_config.prompt_id not in state.steps_completed:
+            state.steps_completed.append(step_config.prompt_id)
 
     def _build_context_pack(
         self,

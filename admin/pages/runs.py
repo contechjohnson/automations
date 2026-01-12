@@ -1,23 +1,41 @@
 """
 Pipeline Runs Page
 
-Simple table of runs. Click to expand and see step details.
+View and manage pipeline runs. Uses local database directly.
 """
 import streamlit as st
-import httpx
 import os
+import sys
 from datetime import datetime
 
-API_URL = os.environ.get("API_URL", "https://api.columnline.dev")
+# Add project root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from columnline_app.v2.db.repository import V2Repository
+from columnline_app.v2.db.models import PipelineRun, PipelineStatus
+
+
+def get_repo():
+    """Get repository instance"""
+    return V2Repository()
 
 
 def get_runs(limit: int = 20):
-    """Fetch recent pipeline runs"""
+    """Fetch recent pipeline runs from local database"""
     try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(f"{API_URL}/v2/pipeline/runs", params={"limit": limit})
-            if response.status_code == 200:
-                return response.json().get("runs", [])
+        repo = get_repo()
+        result = repo.supabase.table("v2_pipeline_runs").select("*").order("started_at", desc=True).limit(limit).execute()
+        runs = result.data if result.data else []
+
+        # Enrich with client names
+        for run in runs:
+            if run.get("client_id"):
+                client = repo.get_client(run["client_id"])
+                run["client_name"] = client.name if client else "Unknown"
+            else:
+                run["client_name"] = "Unknown"
+
+        return runs
     except Exception as e:
         st.error(f"Failed to fetch runs: {e}")
     return []
@@ -26,63 +44,39 @@ def get_runs(limit: int = 20):
 def get_run_detail(run_id: str):
     """Fetch full run detail with steps"""
     try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(f"{API_URL}/v2/pipeline/runs/{run_id}")
-            if response.status_code == 200:
-                return response.json()
+        repo = get_repo()
+
+        # Get run
+        run_result = repo.supabase.table("v2_pipeline_runs").select("*").eq("id", run_id).single().execute()
+        run = run_result.data if run_result.data else None
+
+        if not run:
+            return None
+
+        # Enrich with client name
+        if run.get("client_id"):
+            client = repo.get_client(run["client_id"])
+            run["client_name"] = client.name if client else "Unknown"
+
+        # Get steps
+        steps_result = repo.supabase.table("v2_step_runs").select("*").eq("pipeline_run_id", run_id).order("started_at").execute()
+        steps = steps_result.data if steps_result.data else []
+
+        return {"run": run, "steps": steps}
     except Exception as e:
-        st.error(f"Failed to fetch run: {e}")
+        st.error(f"Failed to fetch run detail: {e}")
     return None
 
 
 def get_clients():
     """Fetch available clients"""
     try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(f"{API_URL}/v2/clients")
-            if response.status_code == 200:
-                return response.json().get("clients", [])
+        repo = get_repo()
+        clients = repo.get_clients()
+        return [{"id": c.id, "name": c.name, "slug": c.slug} for c in clients]
     except Exception as e:
         st.error(f"Failed to fetch clients: {e}")
     return []
-
-
-def start_pipeline(client_id: str, company_name: str, hint: str = ""):
-    """Start a new pipeline run"""
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(
-                f"{API_URL}/v2/pipeline/start",
-                json={
-                    "client_id": client_id,
-                    "seed": {"company_name": company_name, "hint": hint or company_name},
-                    "config": {}
-                }
-            )
-            if response.status_code == 200:
-                return response.json()
-            else:
-                st.error(f"Failed to start pipeline: {response.text}")
-    except Exception as e:
-        st.error(f"Error starting pipeline: {e}")
-    return None
-
-
-def rerun_step(run_id: str, step_id: str, overrides: dict = None):
-    """Re-run a step with stored input (or overrides)"""
-    try:
-        with httpx.Client(timeout=120.0) as client:  # Longer timeout for re-runs
-            response = client.post(
-                f"{API_URL}/v2/pipeline/runs/{run_id}/steps/{step_id}/rerun",
-                json={"variable_overrides": overrides or {}}
-            )
-            if response.status_code == 200:
-                return response.json()
-            else:
-                st.error(f"Failed to rerun step: {response.text}")
-    except Exception as e:
-        st.error(f"Error rerunning step: {e}")
-    return None
 
 
 def format_time_ago(timestamp_str: str) -> str:
@@ -117,12 +111,12 @@ def status_emoji(status: str) -> str:
 
 def render_runs_page():
     """Main runs page"""
-    # Header with new run form
+    # Header with refresh
     col1, col2 = st.columns([3, 1])
     with col1:
         st.subheader("Pipeline Runs")
     with col2:
-        if st.button("🔄 Refresh"):
+        if st.button("🔄 Refresh", key="refresh_runs"):
             st.rerun()
 
     # New run form
@@ -130,16 +124,13 @@ def render_runs_page():
         clients = get_clients()
         if clients:
             client_options = {c["name"]: c["id"] for c in clients}
-            selected_client = st.selectbox("Client", list(client_options.keys()))
-            company_name = st.text_input("Company Name", placeholder="e.g. Anthropic")
-            hint = st.text_input("Search Hint (optional)", placeholder="e.g. AI company San Francisco")
+            selected_client = st.selectbox("Client", list(client_options.keys()), key="new_run_client")
+            company_name = st.text_input("Company Name", placeholder="e.g. Anthropic", key="new_run_company")
+            hint = st.text_input("Search Hint (optional)", placeholder="e.g. AI company San Francisco", key="new_run_hint")
 
-            if st.button("🚀 Start Pipeline", type="primary"):
+            if st.button("🚀 Start Pipeline", type="primary", key="start_pipeline_btn"):
                 if company_name:
-                    result = start_pipeline(client_options[selected_client], company_name, hint)
-                    if result:
-                        st.success(f"Pipeline started: {result.get('id')}")
-                        st.rerun()
+                    st.info("Pipeline start via dashboard not yet implemented. Use API or test script.")
                 else:
                     st.warning("Enter a company name")
         else:
@@ -149,30 +140,33 @@ def render_runs_page():
     runs = get_runs()
 
     if not runs:
-        st.info("No pipeline runs yet. Start one above.")
+        st.info("No pipeline runs yet. Run the test script or API to create some.")
+        st.code("python3 -m columnline_app.v2.test_pipeline", language="bash")
         return
 
     # Display as expandable rows
-    for run in runs:
+    for i, run in enumerate(runs):
         status = run.get("status", "unknown")
-        company = run.get("seed", {}).get("company_name", "Unknown")
+        seed = run.get("seed", {})
+        company = seed.get("company_name", "Unknown") if isinstance(seed, dict) else "Unknown"
         client_name = run.get("client_name", "Unknown")
         started = format_time_ago(run.get("started_at"))
-        steps_completed = len(set(run.get("steps_completed", [])))
+        steps_completed = run.get("steps_completed", [])
+        steps_count = len(steps_completed) if isinstance(steps_completed, list) else 0
 
         # Header row
-        header = f"{status_emoji(status)} **{company}** | {client_name} | {started} | {steps_completed} steps"
+        header = f"{status_emoji(status)} **{company}** | {client_name} | {started} | {steps_count} steps"
 
         with st.expander(header, expanded=(status == "running")):
             run_detail = get_run_detail(run["id"])
 
             if run_detail:
-                render_run_detail(run_detail)
+                render_run_detail(run_detail, i)
             else:
                 st.error("Could not load run details")
 
 
-def render_run_detail(run_detail: dict):
+def render_run_detail(run_detail: dict, run_index: int):
     """Render detailed view of a run"""
     run = run_detail.get("run", {})
     steps = run_detail.get("steps", [])
@@ -182,9 +176,10 @@ def render_run_detail(run_detail: dict):
     with col1:
         st.metric("Status", run.get("status", "unknown"))
     with col2:
-        st.metric("Current Step", run.get("current_step", "-"))
+        st.metric("Current Step", run.get("current_step", "-") or "-")
     with col3:
-        st.metric("Steps Completed", len(set(run.get("steps_completed", []))))
+        steps_completed = run.get("steps_completed", [])
+        st.metric("Steps Completed", len(steps_completed) if isinstance(steps_completed, list) else 0)
 
     # Error message if failed
     if run.get("error_message"):
@@ -196,7 +191,7 @@ def render_run_detail(run_detail: dict):
     # Steps table
     if steps:
         st.markdown("### Steps")
-        for step in steps:
+        for step_idx, step in enumerate(steps):
             step_status = step.get("status", "pending")
             step_name = step.get("step", "unknown")
             duration = step.get("duration_ms")
@@ -213,17 +208,24 @@ def render_run_detail(run_detail: dict):
                 st.write(f"{tokens:,}" if tokens else "-")
             with cols[3]:
                 if step.get("parsed_output"):
-                    if st.button("View I/O", key=f"io_{step['id']}"):
-                        st.session_state[f"show_io_{step['id']}"] = True
+                    # Unique key for each button
+                    btn_key = f"view_io_{run_index}_{step_idx}_{step.get('id', step_idx)}"
+                    if st.button("View I/O", key=btn_key):
+                        st.session_state[f"show_io_{step.get('id', step_idx)}"] = True
 
             # Show I/O if expanded
-            if st.session_state.get(f"show_io_{step['id']}"):
-                render_step_io(step, run.get("id"))
+            step_id = step.get('id', step_idx)
+            if st.session_state.get(f"show_io_{step_id}"):
+                render_step_io(step, run.get("id"), run_index, step_idx)
+    else:
+        st.info("No step data available")
 
 
-def render_step_io(step: dict, run_id: str = None):
+def render_step_io(step: dict, run_id: str, run_index: int, step_index: int):
     """Render step input/output"""
     step_name = step.get('step', 'unknown')
+    step_id = step.get('id', step_index)
+
     st.markdown(f"#### {step_name} I/O")
 
     # Show model and duration
@@ -278,29 +280,8 @@ def render_step_io(step: dict, run_id: str = None):
                     st.write(f"  - Input: {stats.get('input_claims', 0)}")
                     st.write(f"  - Output: {stats.get('output_claims', 0)}")
                     st.write(f"  - Duplicates merged: {stats.get('duplicates_merged', 0)}")
-                    st.write(f"  - Conflicts resolved: {stats.get('conflicts_resolved', 0)}")
             else:
-                # Check for claims extraction summary
-                extraction = output.get("_claims_extraction", {})
-                if extraction:
-                    st.write(f"**Claims Extracted:** {extraction.get('total_claims', 0)}")
-                    by_type = extraction.get("by_type", {})
-                    if by_type:
-                        non_zero = {k: v for k, v in by_type.items() if v > 0}
-                        if non_zero:
-                            st.write("By type: " + ", ".join(f"{k}: {v}" for k, v in non_zero.items()))
-
-                # Show raw output JSON
                 st.json(output)
-
-                # Show claims if present in output
-                claims = output.get("claims", [])
-                if claims:
-                    st.markdown(f"**Claims in Output: {len(claims)}**")
-                    for claim in claims[:10]:
-                        st.write(f"- {claim.get('claim_type', 'NOTE')}: {claim.get('statement', '')[:100]}")
-                    if len(claims) > 10:
-                        st.write(f"... and {len(claims) - 10} more")
         else:
             raw = step.get("raw_output", "")
             if raw:
@@ -311,20 +292,9 @@ def render_step_io(step: dict, run_id: str = None):
     # Error if present
     if step.get("error_message"):
         st.error(f"**Error:** {step['error_message']}")
-        if step.get("error_traceback"):
-            with st.expander("Full Traceback"):
-                st.code(step["error_traceback"])
 
-    # Action buttons
-    col_actions1, col_actions2, col_actions3 = st.columns([1, 1, 2])
-    with col_actions1:
-        if st.button("Close", key=f"close_{step['id']}"):
-            st.session_state[f"show_io_{step['id']}"] = False
-            st.rerun()
-    with col_actions2:
-        if run_id and st.button("Re-run Step", key=f"rerun_{step['id']}"):
-            with st.spinner("Re-running step..."):
-                result = rerun_step(run_id, step_name)
-                if result:
-                    st.success(f"Step re-run completed in {result.get('duration_ms', 0)/1000:.1f}s")
-                    st.rerun()
+    # Close button
+    close_key = f"close_{run_index}_{step_index}_{step_id}"
+    if st.button("Close", key=close_key):
+        st.session_state[f"show_io_{step_id}"] = False
+        st.rerun()

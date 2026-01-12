@@ -1,37 +1,40 @@
 """
 Prompts Page
 
-Simple table of prompts. Click to edit and see last run I/O.
+View and edit prompts. Uses local files directly.
 """
 import streamlit as st
-import httpx
 import os
+import sys
 from pathlib import Path
 
-API_URL = os.environ.get("API_URL", "https://api.columnline.dev")
+# Add project root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from columnline_app.v2.db.repository import V2Repository
+from columnline_app.v2.config import PIPELINE_STEPS
+
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "v2"
 
 
 def get_prompts():
-    """Fetch prompts from API or files"""
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(f"{API_URL}/v2/prompts")
-            if response.status_code == 200:
-                return response.json().get("prompts", [])
-    except Exception as e:
-        st.warning(f"API unavailable, loading from files: {e}")
-
-    # Fallback: load from files
+    """Get prompts from config and files"""
     prompts = []
-    if PROMPTS_DIR.exists():
-        for f in PROMPTS_DIR.glob("*.md"):
-            prompts.append({
-                "prompt_id": f.stem,
-                "name": f.stem.replace("-", " ").title(),
-                "stage": "UNKNOWN",
-                "step_order": 0
-            })
+
+    # Get from pipeline config
+    for step_id, config in PIPELINE_STEPS.items():
+        prompts.append({
+            "prompt_id": config.prompt_id,
+            "name": config.name,
+            "stage": config.stage.value if hasattr(config.stage, 'value') else str(config.stage),
+            "step_order": config.step_order,
+            "model": config.model,
+            "produces_claims": config.produces_claims,
+        })
+
+    # Sort by step order
+    prompts.sort(key=lambda p: (p["step_order"], p["prompt_id"]))
+
     return prompts
 
 
@@ -57,21 +60,11 @@ def save_prompt_content(prompt_id: str, content: str) -> bool:
 def get_last_step_run(prompt_id: str) -> dict:
     """Get last step run for this prompt"""
     try:
-        with httpx.Client(timeout=30.0) as client:
-            # Get recent runs and find step with this prompt
-            response = client.get(f"{API_URL}/v2/pipeline/runs", params={"limit": 10})
-            if response.status_code == 200:
-                runs = response.json().get("runs", [])
-                for run in runs:
-                    # Get run detail to find step
-                    detail = client.get(f"{API_URL}/v2/pipeline/runs/{run['id']}")
-                    if detail.status_code == 200:
-                        data = detail.json()
-                        for step in data.get("steps", []):
-                            # Match step name to prompt_id (step names like "3-entity-research")
-                            step_name = step.get("step", "")
-                            if prompt_id in step_name or step_name.endswith(prompt_id):
-                                return step
+        repo = V2Repository()
+        # Query step runs that match this prompt
+        result = repo.supabase.table("v2_step_runs").select("*").like("step", f"%{prompt_id}%").order("started_at", desc=True).limit(1).execute()
+        if result.data:
+            return result.data[0]
     except Exception as e:
         pass
     return {}
@@ -93,7 +86,8 @@ def render_prompts_page():
     selected_id = st.selectbox(
         "Select Prompt",
         list(prompt_options.keys()),
-        format_func=lambda x: f"{prompt_options[x].get('stage', 'UNKNOWN')} | {x}"
+        format_func=lambda x: f"{prompt_options[x].get('stage', 'UNKNOWN')} | {x}",
+        key="prompt_selector"
     )
 
     if selected_id:
@@ -118,6 +112,10 @@ def render_prompt_detail(prompt_id: str, prompt_meta: dict):
     st.markdown("#### Prompt Content")
     content = get_prompt_content(prompt_id)
 
+    if not content:
+        st.warning(f"Prompt file not found: prompts/v2/{prompt_id}.md")
+        return
+
     edited_content = st.text_area(
         "Edit prompt",
         value=content,
@@ -129,7 +127,7 @@ def render_prompt_detail(prompt_id: str, prompt_meta: dict):
     # Save button
     col1, col2 = st.columns([1, 4])
     with col1:
-        if st.button("💾 Save", type="primary"):
+        if st.button("💾 Save", type="primary", key=f"save_{prompt_id}"):
             if save_prompt_content(prompt_id, edited_content):
                 st.success("Saved!")
             else:
@@ -177,13 +175,8 @@ def render_prompt_detail(prompt_id: str, prompt_meta: dict):
 
         # Run info
         if last_run.get("duration_ms"):
-            st.write(f"Duration: {last_run['duration_ms']/1000:.1f}s | Tokens: {last_run.get('tokens_in', 0):,}")
+            duration_s = last_run['duration_ms'] / 1000
+            tokens = last_run.get('tokens_in', 0) or 0
+            st.write(f"Duration: {duration_s:.1f}s | Tokens: {tokens:,}")
     else:
         st.info("No recent runs found for this prompt")
-
-    # Test button
-    st.markdown("---")
-    with st.expander("🧪 Test This Prompt"):
-        st.info("Test functionality: Uses last run input to re-run this step")
-        if st.button("Run with Last Input"):
-            st.warning("Test execution not yet implemented")
