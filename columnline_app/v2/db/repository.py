@@ -223,12 +223,17 @@ class V2Repository:
 
     def create_claims_batch(self, claims: List[Claim]) -> List[Claim]:
         """Create multiple claims"""
+        from datetime import date as date_type
         data_list = []
         for claim in claims:
             data = claim.model_dump(exclude={"id", "created_at"})
             data["claim_type"] = data["claim_type"].value if hasattr(data["claim_type"], "value") else data["claim_type"]
             data["source_tier"] = data["source_tier"].value if hasattr(data["source_tier"], "value") else data["source_tier"]
             data["confidence"] = data["confidence"].value if hasattr(data["confidence"], "value") else data["confidence"]
+            # Convert date objects to strings for JSON serialization
+            if data.get("date_in_claim"):
+                if isinstance(data["date_in_claim"], (date_type, datetime)):
+                    data["date_in_claim"] = str(data["date_in_claim"])
             data_list.append(data)
         result = self.client.table("v2_claims").insert(data_list).execute()
         return [Claim(**row) for row in result.data]
