@@ -443,13 +443,13 @@ async def get_run_claims(run_id: str, merged: Optional[bool] = None):
     if merged is None:
         # Return both raw and merged
         raw_claims = repo.get_claims(run_id, is_merged=False)
-        merged_claims = repo.get_merged_claims(run_id)
+        merged_claims = repo.get_claims(run_id, is_merged=True)
         return {
             "raw_claims": [c.model_dump() for c in raw_claims],
             "merged_claims": [c.model_dump() for c in merged_claims],
         }
     elif merged:
-        claims = repo.get_merged_claims(run_id)
+        claims = repo.get_claims(run_id, is_merged=True)
         return {"claims": [c.model_dump() for c in claims]}
     else:
         claims = repo.get_claims(run_id, is_merged=False)
