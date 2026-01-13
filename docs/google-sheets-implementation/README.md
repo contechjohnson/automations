@@ -1,0 +1,438 @@
+# Google Sheets Implementation Documentation
+
+**Project:** Columnline Dossier Pipeline - Google Sheets Intermediate Data Layer
+**Date:** 2026-01-12
+**Status:** Design Complete, Ready for Implementation
+
+---
+
+## 📋 Scope & Purpose
+
+### What This Is
+
+An **intermediate data layer** using Google Sheets as the database for the Columnline dossier generation pipeline, replacing the current "live input/output" Make.com approach that causes overwrites during concurrent runs.
+
+### What Problem This Solves
+
+**Current Issue:** Running 80+ dossiers concurrently on Monday causes "live input/output" columns in Make.com to overwrite each other. No execution history. Hard to debug.
+
+**Solution:** Google Sheets with per-run isolation:
+- Each dossier run gets unique `run_id`
+- All execution data scoped by `run_id`
+- Complete execution history preserved
+- No conflicts between concurrent runs
+
+### Why Google Sheets (Not Supabase Yet)
+
+**Google Sheets = Intermediate Step:**
+- Already connected in Make.com (no OAuth setup pain)
+- Visual debugging (open sheet, see data)
+- Easy manual fixes (edit a cell if needed)
+- Familiar spreadsheet interface
+
+**Future Migration to Supabase:**
+- This architecture is designed to migrate easily
+- Same scenario structure, just swap modules (Sheets → HTTP)
+- No logic changes needed in Make.com
+- Timeline: After proving schema with Google Sheets
+
+### Timeline
+
+- **Phase 1 (Now):** Design complete, CSVs generated
+- **Phase 2 (Tonight):** Import CSVs, build Make.com scenarios
+- **Phase 3 (1-2 weeks):** Test with real dossier runs
+- **Phase 4 (Later):** Migrate to Supabase once stable
+
+---
+
+## 📚 Documentation Overview
+
+All documents are numbered for easy sequential reading:
+
+### 01. Schema Design (`01-schema-design.md`)
+
+**The master reference.** Complete 14-sheet schema with:
+- Design philosophy (keep it simple, flexible, non-fragile)
+- All 14 sheets detailed (Config + Execution layers)
+- Make.com scenario architecture (pass IDs, fetch everything)
+- Denormalization strategy (input/output columns)
+- Migration path to Supabase
+
+**Read this first** to understand the overall design.
+
+### 02. Scenario Architecture (`02-scenario-architecture.md`)
+
+**How Make.com scenarios are structured.** Explains:
+- Isolated, self-contained scenario pattern
+- What gets passed (run_id, client_id, dossier_id)
+- What gets fetched (configs, prompts, previous outputs)
+- Flow from Main → Bridge → Sub scenarios
+- Benefits: testability, debugging, future-proofing
+
+**Read this** to understand how scenarios interact.
+
+### 03. Make.com API Reference (`03-makecom-api-reference.md`)
+
+**Quick reference for using Google Sheets API in Make.com:**
+- Core API endpoints (GET values, POST append)
+- Simple pattern: Fetch once → Pass through → Write once
+- All 10 sheets you'll use (ranges, when to read/write)
+- Make.com module configuration examples
+- Helper functions (filter arrays, JSON stringify, generate IDs)
+
+**Use this** as a cheat sheet while building scenarios.
+
+### 04. Complete API Calls (`04-complete-api-calls.md`)
+
+**Exhaustive breakdown of every API call for full dossier:**
+- Complete list for each scenario (reads + writes)
+- Total: ~132 calls per dossier (well within rate limits)
+- JSON formatting patterns
+- ID generation templates
+- Error handling patterns
+- Testing individual scenarios in isolation
+
+**Reference this** when building each scenario to see exact calls needed.
+
+### 05. Import Guide (`05-import-guide.md`)
+
+**Step-by-step instructions for importing CSVs to Google Sheets:**
+- Create new Google Sheet
+- Import 14 CSVs as tabs (exact naming required)
+- Get Sheet ID from URL
+- Add to Make.com as variable
+- Test read/write access
+
+**Follow this tonight** to set up the Google Sheet.
+
+### 06. Validation Checklist (`06-validation-checklist.md`)
+
+**Pre-implementation validation:**
+- All 14 sheets validated (columns, structure)
+- Architecture decisions confirmed
+- Input/output columns verified (PipelineSteps.F and .G)
+- Rate limit safety check (0.3 calls/sec avg = safe)
+- Supabase migration path confirmed
+- Ready to build checklist
+
+**Use this** to verify everything is correct before starting.
+
+### 07. Prompt Gap Analysis (`07-prompt-gap-analysis.md`)
+
+**Status of prompt content:**
+- Current CSV has 20 prompts with placeholders
+- Real prompts folder has 30 detailed prompts (2-5KB each)
+- Gap: 10 missing prompts (compression, extra steps)
+- Status: NOT a blocker - can proceed with current structure
+- Variable syntax needs cleanup (separate variables section)
+
+**Reference this** when updating prompts later.
+
+---
+
+## 🏗️ Architecture Summary
+
+### Core Principle
+
+**Pass IDs, Fetch Everything Else**
+
+Instead of passing 50 variables through scenarios, just pass:
+- `run_id` - Links all execution data
+- `client_id` - For fetching client config
+- `dossier_id` - Generated by main pipeline
+- `seed` - Optional starting point
+
+Each scenario fetches what it needs from sheets.
+
+### 14-Sheet Structure
+
+**Config Layer (3 sheets)** - Read-only during runs:
+1. Clients - Client configs (ICP, industry research, etc.)
+2. Prompts - Prompt templates (20 prompts)
+3. SectionDefinitions - Expected variables per section
+
+**Execution Layer (11 sheets)** - Per-run mutable state:
+4. Onboarding - Client onboarding runs
+5. PrepInputs - Config compression runs
+6. BatchComposer - Batch planning runs
+7. Runs - Dossier execution tracking
+8. PipelineSteps - Step execution logs (input/output per step)
+9. Claims - Extracted facts (JSON blobs)
+10. MergedClaims - Merged claims (decoupled from 07B_INSIGHT)
+11. ContextPacks - Context briefings
+12. Contacts - Enriched contacts (32 columns)
+13. Sections - Dossier sections
+14. Dossiers - Final assembled dossiers
+
+### Key Design Decisions
+
+**1. Denormalization for Visibility**
+- PipelineSteps has `input` and `output` columns (full JSON)
+- Claims appear in both Claims sheet AND PipelineSteps.input/output
+- Gain: "Look at one row to see complete step execution"
+
+**2. Isolated Scenarios**
+- Each scenario runnable independently
+- Fetch configs/prompts at start of each scenario
+- No dependency on main pipeline passing context
+- Easy to test individual steps
+
+**3. Simple Claims Structure**
+- One row per claims-producing step
+- Entire claims array in one JSON column
+- No parsing into individual rows
+- Keep it flexible, non-fragile
+
+**4. Dual Config Versions**
+- All 3 configs have compressed versions (ICP, industry, research_context)
+- Use compressed for most steps (cost savings)
+- Use original for batch composer and feedback
+
+### API Call Budget
+
+**Per Full Dossier:**
+- Total: ~132 API calls
+- Spread over: 5-10 minutes
+- Average: 0.3 calls/second
+- Rate limit: 1 call/second
+- Status: ✅ 3.3× under limit
+
+**Breakdown:**
+- Reads: 79 calls (client configs, prompts, previous outputs)
+- Writes: 53 calls (PipelineSteps, Claims, Contacts, Sections, Dossiers)
+
+---
+
+## 🚀 Implementation Checklist
+
+### Phase 1: Setup (Tonight)
+
+- [ ] Import 14 CSVs to Google Sheets (see `05-import-guide.md`)
+- [ ] Get Sheet ID from URL
+- [ ] Add `GOOGLE_SHEETS_ID` variable to Make.com
+- [ ] Test read: Clients + Prompts
+- [ ] Test write: Runs sheet
+
+### Phase 2: Build First Scenario
+
+- [ ] Pick one simple scenario (Enrich Lead recommended)
+- [ ] Create test data manually (1 row in Runs, 1 row in Claims)
+- [ ] Build scenario using `04-complete-api-calls.md`
+- [ ] Test in isolation (pass test run_id, client_id)
+- [ ] Verify PipelineSteps has input/output populated
+
+### Phase 3: Expand to Full Pipeline
+
+- [ ] Clone tested scenario for other steps
+- [ ] Build bridge scenarios (Enrich Contacts, Section Writers)
+- [ ] Connect main pipeline to call all scenarios
+- [ ] Test with 1 full dossier end-to-end
+- [ ] Check all 14 sheets populated correctly
+
+### Phase 4: Production Testing
+
+- [ ] Run 5 dossiers (different clients)
+- [ ] Verify no overwrites between concurrent runs
+- [ ] Check execution history in PipelineSteps
+- [ ] Validate dossier quality matches baseline
+- [ ] Monitor API rate limits
+
+### Phase 5: Scale Up
+
+- [ ] Run 20 dossiers on Monday morning
+- [ ] Monitor for any issues
+- [ ] Scale to 50, then 80 dossiers
+- [ ] Document any edge cases
+
+### Phase 6: Migrate to Supabase (Later)
+
+- [ ] Build Python API endpoints matching sheet structure
+- [ ] Replace Google Sheets modules with HTTP modules
+- [ ] Test with 1 dossier
+- [ ] Migrate scenarios one by one
+- [ ] Deprecate Google Sheets
+
+---
+
+## 📊 Success Criteria
+
+### Must Have (Phase 1-3)
+
+- ✅ All 14 sheets imported and structured correctly
+- ✅ Can read client config + prompts from sheets
+- ✅ Can write to all execution sheets (Runs, PipelineSteps, Claims, etc.)
+- ✅ One complete dossier generates successfully
+- ✅ All sheets populated with correct data
+- ✅ No overwrites between runs
+
+### Should Have (Phase 4)
+
+- ✅ 5+ dossiers run successfully
+- ✅ Execution history queryable (filter by run_id)
+- ✅ PipelineSteps input/output columns useful for debugging
+- ✅ Dossier quality matches current baseline
+- ✅ No rate limit issues
+
+### Nice to Have (Phase 5)
+
+- ✅ 80 concurrent dossiers on Monday (no conflicts)
+- ✅ Can run individual scenarios in isolation for testing
+- ✅ Easy to add new prompts (just add row to Prompts sheet)
+- ✅ Visual debugging via Google Sheets (open sheet, see data)
+
+---
+
+## 🔄 Migration Path to Supabase
+
+**Current (Google Sheets):**
+```
+[1] Google Sheets > Get Values (Clients!A2:M100)
+    Filter: client_id = {{client_id}}
+[2] LLM Call
+[3] Google Sheets > Add Row (PipelineSteps)
+    Values: run_id, step_id, input, output, tokens_used, etc.
+```
+
+**Future (Supabase):**
+```
+[1] HTTP > GET api.columnline.dev/clients/{{client_id}}
+    Returns: {icp_config, industry_research, ...}
+[2] LLM Call
+[3] HTTP > POST api.columnline.dev/pipeline_steps
+    Body: {run_id, step_id, input, output, tokens_used, ...}
+```
+
+**What Changes:**
+- Module type: Google Sheets → HTTP
+- Endpoint: Sheet range → API URL
+- Data format: Mostly same (JSON → JSON)
+
+**What Stays the Same:**
+- Scenario structure
+- Data flow (fetch config → LLM → write log)
+- Variables passed between scenarios
+- Logic and routing
+
+**Estimated Migration Time:** 1-2 days (mechanical module replacement)
+
+---
+
+## 🛠️ Tools & Resources
+
+### CSVs Ready for Import
+
+**Location:** `tmp/sheets_export/`
+
+**Files:**
+- 01_clients.csv - 1 example client
+- 02_prompts.csv - 20 prompts (placeholders for now)
+- 03_section_definitions.csv - 2 example sections
+- 04-14: Empty templates (Onboarding through Dossiers)
+
+**Import Order:** Any order works, but Config layer first (01-03) makes sense
+
+### Make.com Resources
+
+**Modules You'll Use:**
+- Google Sheets > Get Values (Advanced) - For reads
+- Google Sheets > Add a Row - For writes
+- Google Sheets > Update a Row - For status updates
+- Iterator - For processing arrays
+- Filter - For filtering by field
+- Tools > Set Variable - For storing Sheet ID
+
+**Helpful Make.com Functions:**
+- `{{toString(value)}}` - Convert to JSON string
+- `{{filter(array; "field"; value)}}` - Filter array by field
+- `{{first(array)}}` - Get first element
+- `{{formatDate(now; "YYYY-MM-DD HH:mm:ss")}}` - Timestamp
+- `{{random(1000; 9999)}}` - Random number for IDs
+
+---
+
+## 📞 Quick Reference
+
+### Google Sheets API Endpoint
+
+```
+Base URL: https://sheets.googleapis.com/v4
+```
+
+### Key Ranges
+
+```
+Clients:          Clients!A2:M100
+Prompts:          Prompts!A2:L100
+Runs:             Runs!A:J
+PipelineSteps:    PipelineSteps!A:M
+Claims:           Claims!A:E
+Contacts:         Contacts!A:AG
+Sections:         Sections!A:I
+Dossiers:         Dossiers!A:L
+```
+
+### Generated IDs Pattern
+
+```javascript
+run_id = "RUN_" + formatDate(now, "YYYYMMDDHHmmss")
+dossier_id = "DOSS_" + formatDate(now, "YYYYMMDD") + "_" + random(1000, 9999)
+step_id = "STEP_" + run_id + "_" + iterator
+```
+
+---
+
+## 📝 Notes
+
+### Design Philosophy
+
+"Keep it simple, flexible, non-fragile. JSON stays JSON."
+
+Key principles:
+- Claims as JSON blobs (not normalized)
+- Outputs not in run metadata (separate sheets)
+- Variables tracking for context engineering
+- Denormalized for visibility (accept duplication)
+- Isolated scenarios (pass IDs, fetch everything)
+
+### Why This Works
+
+**Solves Original Problem:**
+- No more overwrites (per-run rows)
+- Complete execution history
+- Easy debugging (input/output columns)
+
+**Easy to Build:**
+- Standard pattern for all scenarios
+- Clear data flow
+- Good documentation
+
+**Easy to Test:**
+- Each scenario runnable independently
+- Can manually create test data
+- Visual inspection via Google Sheets
+
+**Easy to Migrate:**
+- Same structure for Supabase
+- Just swap modules (Sheets → HTTP)
+- No logic changes
+
+---
+
+## 🎯 Start Here
+
+**Tonight's Goal:** Get CSVs imported and build first scenario
+
+**Steps:**
+1. Read `01-schema-design.md` (10 min) - Understand the design
+2. Read `02-scenario-architecture.md` (5 min) - Understand scenario pattern
+3. Follow `05-import-guide.md` (15 min) - Import CSVs to Google Sheets
+4. Use `04-complete-api-calls.md` (ref) - Build first scenario (Enrich Lead)
+5. Test it!
+
+**You have everything you need.** Good luck! 🚀
+
+---
+
+**Last Updated:** 2026-01-12
+**Author:** Claude Code
+**Project:** Columnline Dossier Pipeline - Google Sheets Implementation

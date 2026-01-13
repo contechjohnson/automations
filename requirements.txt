@@ -22,6 +22,10 @@ pydantic==2.5.3
 python-dotenv==1.0.0
 supabase==2.3.0
 
+# Google Sheets
+gspread==6.0.0
+google-auth==2.27.0
+
 # Scraping
 firecrawl-py==0.0.16
 apify-client>=1.5.0

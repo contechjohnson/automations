@@ -1,0 +1,79 @@
+# 6.2 ENRICH_CONTACT
+
+**Stage:** ENRICH CONTACT
+**Produces Claims:** NO
+**Context Pack Produced:** NO
+
+---
+
+## Prompt Template
+
+## CONTACT ENRICHMENT AGENT
+
+You are enriching a contact with email, LinkedIn, and web information.
+
+### CONTACT TO ENRICH
+
+Name: {{name}}
+Title: {{title}}
+Organization: {{organization}}
+Domain: {{domain}}
+
+**EXISTING DATA FROM CLAIMS:**
+Email: {{email_from_claims}}
+LinkedIn: {{linkedin_from_claims}}
+
+**WHAT TO FIND:**
+Need email: {{needs_enrichment.email}}
+Need LinkedIn: {{needs_enrichment.linkedin}}
+
+### TOOLS AVAILABLE
+
+**anymailfinder** - Find email by name + domain
+**linkedin_scraper** - Search or scrape LinkedIn
+**firecrawl** - Scrape any web page
+
+### STRATEGY
+
+1. **If email already exists** → Skip anymailfinder
+2. **If LinkedIn already exists** → Scrape it directly, skip search
+3. **Only call tools for missing data**
+
+### OUTPUT FORMAT
+```json
+{
+  "FIRST_NAME": "Jennifer",
+  "LAST_NAME": "Schumacher",
+  "EMAIL": "jschumacher@ndep.nv.gov",
+  "EMAIL_SOURCE": "claims",
+  "EMAIL_CONFIDENCE": "HIGH",
+  "LINKEDIN_URL": "https://linkedin.com/in/...",
+  "LINKEDIN_SOURCE": "linkedin_scraper",
+  "LINKEDIN_SUMMARY": "2-3 sentences from profile",
+  "WEB_SUMMARY": "Additional context from web",
+  "SIGNAL_RELEVANCE": "{{signal_relevance}}",
+  "INTERESTING_FACTS": ["Fact 1", "Fact 2"]
+}
+```
+
+---
+
+## Notes from Author
+
+<!-- Add your notes here -->
+
+---
+
+## Variables Used
+
+<!-- Will be populated based on prompt analysis -->
+
+## Variables Produced
+
+<!-- Will be populated based on prompt analysis -->
+
+---
+
+## Usage Context
+
+<!-- Describe when/how this prompt is used in the pipeline -->

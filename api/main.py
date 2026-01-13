@@ -22,9 +22,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include v2 router
-from columnline_app.v2.api.router import router as v2_router
-app.include_router(v2_router)
+# Include v2 router (ARCHIVED - commented out for Make.com-first approach)
+# from columnline_app.v2.api.router import router as v2_router
+# app.include_router(v2_router)
+
+# Include Make.com API endpoints
+from api.v2.prompts import router as prompts_router
+from api.v2.clients import router as clients_router
+from api.v2.logs import router as logs_router
+from api.v2.transform import router as transform_router
+
+app.include_router(prompts_router)
+app.include_router(clients_router)
+app.include_router(logs_router)
+app.include_router(transform_router)
+
+# Include Columnline Supabase API
+from api.columnline import router as columnline_router
+app.include_router(columnline_router)
 
 
 class PromptRequest(BaseModel):
