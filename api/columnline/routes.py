@@ -499,18 +499,29 @@ async def prepare_steps(request: StepPrepareRequest):
             if search_output:
                 step_input["search_builder_output"] = search_output.get('output')
 
-        # Claims extraction would need Signal Discovery output
-        if "CLAIM" in step_name.upper() or step_name == "CLAIMS_EXTRACTION":
+        # Entity Research needs Signal Discovery output
+        if step_name == "3_ENTITY_RESEARCH":
             signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
             if signal_output:
                 step_input["signal_discovery_output"] = signal_output.get('output')
 
+        # Claims extraction needs the previous research output
+        if "CLAIM" in step_name.upper() or step_name == "CLAIMS_EXTRACTION":
+            # Try to get most recent research output (could be signal, entity, or contact)
+            for research_step in ["4_CONTACT_DISCOVERY", "3_ENTITY_RESEARCH", "2_SIGNAL_DISCOVERY"]:
+                research_output = repo.get_completed_step(request.run_id, research_step)
+                if research_output:
+                    step_input[f"{research_step.lower()}_output"] = research_output.get('output')
+                    break  # Use most recent research step
+
         # Get model from prompt (defaulting to gpt-4.1)
-        # TODO: Add model field to v2_prompts table, or have Make.com specify it
         model_map = {
             "1_SEARCH_BUILDER": "o4-mini",
             "2_SIGNAL_DISCOVERY": "gpt-4.1",
-            "CLAIMS_EXTRACTION": "gpt-4.1"
+            "3_ENTITY_RESEARCH": "o4-mini-deep-research",
+            "4_CONTACT_DISCOVERY": "o4-mini-deep-research",
+            "CLAIMS_EXTRACTION": "gpt-4.1",
+            "CONTEXT_PACK_BUILDER": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -717,22 +728,34 @@ async def transition_step(request: StepTransitionRequest):
         "dossier_id": request.dossier_id
     }
 
-    # AUTO-FETCH: Add previous step output
-    if request.next_step_name == "2_SIGNAL_DISCOVERY":
-        search_output = repo.get_completed_step(request.run_id, "1_SEARCH_BUILDER")
-        if search_output:
-            step_input["search_builder_output"] = search_output.get('output')
+    # AUTO-FETCH: Add previous step output based on the transition
+    # Use just-completed output when possible (cleaner than fetching from DB)
 
-    if "CLAIM" in request.next_step_name.upper() or request.next_step_name == "CLAIMS_EXTRACTION":
-        signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
-        if signal_output:
-            step_input["signal_discovery_output"] = signal_output.get('output')
+    if request.next_step_name == "2_SIGNAL_DISCOVERY":
+        # Signal Discovery needs Search Builder (just completed)
+        step_input["search_builder_output"] = parsed['full_output']
+
+    if request.next_step_name == "CLAIMS_EXTRACTION":
+        # Claims needs the research output (just completed)
+        if request.completed_step_name in ["3_ENTITY_RESEARCH", "4_CONTACT_DISCOVERY", "2_SIGNAL_DISCOVERY"]:
+            step_input[f"{request.completed_step_name.lower()}_output"] = parsed['full_output']
+
+    if request.next_step_name == "CONTEXT_PACK_BUILDER":
+        # Context pack needs the claims (just completed)
+        step_input["claims_output"] = parsed['full_output']
+
+    if request.next_step_name == "4_CONTACT_DISCOVERY":
+        # Contact discovery needs the entity context pack (just completed)
+        step_input["entity_context_pack"] = parsed['full_output']
 
     # Get model
     model_map = {
         "1_SEARCH_BUILDER": "o4-mini",
         "2_SIGNAL_DISCOVERY": "gpt-4.1",
-        "CLAIMS_EXTRACTION": "gpt-4.1"
+        "3_ENTITY_RESEARCH": "o4-mini-deep-research",
+        "4_CONTACT_DISCOVERY": "o4-mini-deep-research",
+        "CLAIMS_EXTRACTION": "gpt-4.1",
+        "CONTEXT_PACK_BUILDER": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
