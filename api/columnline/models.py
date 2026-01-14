@@ -16,19 +16,35 @@ from pydantic import BaseModel, Field
 class RunStartRequest(BaseModel):
     """Start a new dossier run - main pipeline input"""
     client_id: str
-    seed_data: Dict[str, Any] = Field(..., description="Company/signal to research")
+    seed_data: Optional[Dict[str, Any]] = Field(default=None, description="Any data to start the run - company name, signal, URL, or any JSON structure")
     triggered_by: str = Field(default="make.com", description="Source that triggered the run")
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "client_id": "CLT_EXAMPLE_001",
-                "seed_data": {
-                    "company_name": "Acme Construction",
-                    "signal": "Permit filed for $5M expansion"
+            "examples": [
+                {
+                    "client_id": "CLT_EXAMPLE_001",
+                    "seed_data": {
+                        "company_name": "Acme Construction",
+                        "signal": "Permit filed for $5M expansion"
+                    }
                 },
-                "triggered_by": "make.com"
-            }
+                {
+                    "client_id": "CLT_EXAMPLE_001",
+                    "seed_data": {
+                        "linkedin_url": "https://linkedin.com/company/acme"
+                    }
+                },
+                {
+                    "client_id": "CLT_EXAMPLE_001",
+                    "seed_data": {
+                        "custom_field": "any data structure"
+                    }
+                },
+                {
+                    "client_id": "CLT_EXAMPLE_001"
+                }
+            ]
         }
 
 

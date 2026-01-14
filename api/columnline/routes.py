@@ -103,24 +103,26 @@ async def start_run(request: RunStartRequest):
     Start a new dossier run - MAIN PIPELINE ENTRY POINT
 
     Make.com usage:
-        [1] Webhook receives: {client_id, seed}
-        [2] HTTP POST /columnline/runs/start
+        [1] HTTP POST /columnline/runs/start
             Body: {
                 "client_id": "CLT_EXAMPLE_001",
-                "seed_data": {
-                    "company_name": "Acme Construction",
-                    "signal": "Permit filed for $5M expansion"
-                },
+                "seed_data": {...any JSON structure...},  // OPTIONAL - can be anything
                 "triggered_by": "make.com"
             }
-        [3] Response:
+        [2] Response:
             {
                 "run_id": "RUN_20260113_143022",
                 "dossier_id": "DOSS_20260113_9472",
                 "client_id": "CLT_EXAMPLE_001",
                 "started_at": "2026-01-13T14:30:22Z"
             }
-        [4] Use {{1.run_id}} and {{1.dossier_id}} for tracking
+        [3] Use {{1.run_id}} and {{1.dossier_id}} for tracking
+
+    seed_data is completely flexible:
+        - {"company_name": "Acme", "signal": "expansion"}
+        - {"linkedin_url": "https://..."}
+        - {"whatever": "you want"}
+        - null (omit entirely)
     """
     from datetime import datetime
     import random
