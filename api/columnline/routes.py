@@ -557,6 +557,27 @@ async def prepare_steps(request: StepPrepareRequest):
                     step_input[f"{research_step.lower()}_output"] = extract_clean_content(research_output.get('output'))
                     break  # Use most recent research step
 
+        # Context Pack needs ALL claims extracted so far
+        if step_name == "CONTEXT_PACK":
+            # Find all completed claims extraction steps and get their outputs
+            all_claims = []
+
+            # Check for claims from Signal Discovery
+            signal_claims_step = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+
+            for claims_step in signal_claims_step.data:
+                # Figure out which research step this came from by looking at the input
+                step_input_data = claims_step.get('input', {})
+                claims_output = extract_clean_content(claims_step.get('output'))
+
+                # Add with descriptive key
+                if '2_signal_discovery_output' in step_input_data:
+                    step_input["signal_discovery_claims"] = claims_output
+                elif '3_entity_research_output' in step_input_data:
+                    step_input["entity_research_claims"] = claims_output
+                elif '4_contact_discovery_output' in step_input_data:
+                    step_input["contact_discovery_claims"] = claims_output
+
         # Enrich steps need entity research output
         if step_name in ["5A_ENRICH_LEAD", "5B_ENRICH_OPPORTUNITY", "5C_CLIENT_SPECIFIC"]:
             entity_output = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
@@ -798,8 +819,29 @@ async def transition_step(request: StepTransitionRequest):
             step_input[f"{request.completed_step_name.lower()}_output"] = clean_output
 
     if request.next_step_name == "CONTEXT_PACK":
-        # Context pack needs the claims (just completed)
-        step_input["claims_output"] = clean_output
+        # Context pack needs ALL claims extracted so far, not just the most recent
+        # Find all completed claims extraction steps
+        all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+
+        for claims_step in all_claims_steps.data:
+            # Figure out which research step this came from
+            step_input_data = claims_step.get('input', {})
+            claims_output = extract_clean_content(claims_step.get('output'))
+
+            # Add with descriptive key
+            if '2_signal_discovery_output' in step_input_data:
+                step_input["signal_discovery_claims"] = claims_output
+            elif '3_entity_research_output' in step_input_data:
+                step_input["entity_research_claims"] = claims_output
+            elif '4_contact_discovery_output' in step_input_data:
+                step_input["contact_discovery_claims"] = claims_output
+
+        # Also add the just-completed claims (in case the above query didn't catch it yet)
+        if request.completed_step_name == "CLAIMS_EXTRACTION":
+            # Need to figure out which research step this came from the transition request
+            # We can look at what we just stored to figure this out
+            # For now, just add it as "latest_claims"
+            step_input["latest_claims"] = clean_output
 
     if request.next_step_name == "4_CONTACT_DISCOVERY":
         # Contact discovery needs the entity context pack (just completed)
