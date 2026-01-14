@@ -681,22 +681,24 @@ async def transition_step(request: StepTransitionRequest):
     # Parse the OpenAI output
     parsed = parse_openai_response(request.completed_step_output)
 
-    # Find the running step to complete
+    # Find the step to complete - try "running" first, then any status
     result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).eq('status', 'running').execute()
 
     if not result.data:
-        raise HTTPException(status_code=404, detail=f"Running step not found: {request.completed_step_name}")
+        # Not in "running" status - try to find it with any status
+        result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).execute()
 
-    completed_step = result.data[0]
-
-    # Store the completed step output
-    repo.update_pipeline_step(completed_step['step_id'], {
-        "status": "completed",
-        "output": parsed['full_output'],  # Store full response
-        "tokens_used": parsed['tokens_used'],
-        "runtime_seconds": parsed['runtime_seconds'],
-        "completed_at": datetime.now().isoformat()
-    })
+    # If we found the step, update it to completed
+    if result.data:
+        completed_step = result.data[0]
+        repo.update_pipeline_step(completed_step['step_id'], {
+            "status": "completed",
+            "output": parsed['full_output'],  # Store full response
+            "tokens_used": parsed['tokens_used'],
+            "runtime_seconds": parsed['runtime_seconds'],
+            "completed_at": datetime.now().isoformat()
+        })
+    # If step doesn't exist at all, that's okay - just proceed to create the next one
 
     # Now prepare the next step (same logic as /steps/prepare but for one step)
     run = repo.get_run(request.run_id)
