@@ -251,3 +251,31 @@ class StepCompleteResponse(BaseModel):
     run_id: str
     steps_completed: List[str]
     message: str = "Steps completed successfully"
+
+
+class StepTransitionRequest(BaseModel):
+    """Store previous step output and prepare next step - ONE CALL"""
+    run_id: str
+    client_id: str
+    dossier_id: str
+
+    # Previous step (to complete)
+    completed_step_name: str
+    completed_step_output: Any = Field(..., description="Full OpenAI API response (we'll parse it)")
+
+    # Next step (to prepare)
+    next_step_name: str
+
+
+class StepTransitionResponse(BaseModel):
+    """Response with completed step stored and next step prepared"""
+    success: bool = True
+    run_id: str
+
+    # What was stored
+    completed_step: str
+    tokens_used: int
+    runtime_seconds: float
+
+    # What's prepared for next
+    next_step: PreparedStep

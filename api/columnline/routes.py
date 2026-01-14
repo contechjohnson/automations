@@ -19,11 +19,65 @@ from .models import (
     OutputsResponse, StepOutput,
     SuccessResponse,
     StepPrepareRequest, StepPrepareResponse, PreparedStep,
-    StepCompleteRequest, StepCompleteResponse, StepOutputItem
+    StepCompleteRequest, StepCompleteResponse, StepOutputItem,
+    StepTransitionRequest, StepTransitionResponse
 )
 
 router = APIRouter(prefix="/columnline", tags=["columnline"])
 repo = ColumnlineRepository()
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def parse_openai_response(openai_output):
+    """
+    Parse OpenAI API response to extract text, tokens, and runtime
+
+    Handles both array format and single response format
+    """
+    # If it's an array, take first element
+    if isinstance(openai_output, list):
+        openai_output = openai_output[0]
+
+    # Extract response text
+    response_text = None
+    if 'result' in openai_output:
+        response_text = openai_output['result']
+    elif 'output' in openai_output and isinstance(openai_output['output'], list):
+        # From output[0].content[0].text
+        if openai_output['output'] and 'content' in openai_output['output'][0]:
+            content = openai_output['output'][0]['content']
+            if content and 'text' in content[0]:
+                response_text = content[0]['text']
+
+    # Extract tokens
+    tokens_used = 0
+    if 'usage' in openai_output:
+        usage = openai_output['usage']
+        tokens_used = usage.get('total_tokens', 0)
+        if tokens_used == 0:
+            tokens_used = usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
+
+    # Calculate runtime (completed_at - created_at)
+    runtime_seconds = 0
+    if 'completed_at' in openai_output and 'created_at' in openai_output:
+        # completed_at is unix timestamp, created_at is ISO string
+        completed_ts = openai_output['completed_at']
+        created_at_str = openai_output['created_at']
+        # Parse ISO timestamp to unix
+        from datetime import datetime
+        created_dt = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+        created_ts = created_dt.timestamp()
+        runtime_seconds = completed_ts - created_ts
+
+    return {
+        "text": response_text,
+        "tokens_used": tokens_used,
+        "runtime_seconds": runtime_seconds,
+        "full_output": openai_output  # Store full response for debugging
+    }
 
 
 # ============================================================================
@@ -556,6 +610,150 @@ async def complete_steps(request: StepCompleteRequest):
         run_id=request.run_id,
         steps_completed=completed_steps,
         message=f"{len(completed_steps)} step(s) completed successfully"
+    )
+
+
+@router.post("/steps/transition", response_model=StepTransitionResponse)
+async def transition_step(request: StepTransitionRequest):
+    """
+    STORE PREVIOUS OUTPUT + PREPARE NEXT INPUT - ONE API CALL
+
+    Perfect for chaining: Search Builder → Signal Discovery → Claims
+
+    Make.com flow:
+        [1] POST /steps/prepare (just for first step)
+            Body: {"step_names": ["1_SEARCH_BUILDER"], ...}
+
+        [2] Run Search Builder LLM
+
+        [3] POST /steps/transition (store Search Builder, prepare Signal Discovery)
+            Body: {
+                "run_id": "RUN_...",
+                "client_id": "CLT_...",
+                "dossier_id": "DOSS_...",
+                "completed_step_name": "1_SEARCH_BUILDER",
+                "completed_step_output": {{2.entireOpenAIResponse}},  // Pass the WHOLE thing
+                "next_step_name": "2_SIGNAL_DISCOVERY"
+            }
+
+        [4] Run Signal Discovery LLM with {{3.next_step.prompt_template}} and {{3.next_step.input}}
+
+        [5] POST /steps/transition (store Signal Discovery, prepare Claims)
+            Body: {
+                "completed_step_name": "2_SIGNAL_DISCOVERY",
+                "completed_step_output": {{4.entireOpenAIResponse}},
+                "next_step_name": "PRODUCE_CLAIMS"
+            }
+
+        [6] Run Claims Extractor LLM
+
+        [7] POST /steps/complete (final step - just store)
+
+    Benefits:
+    - ONE API call between AI modules (not two)
+    - Automatic output parsing (we extract text, tokens, runtime)
+    - Auto-fetch dependencies (Signal gets Search output, Claims gets Signal output)
+    """
+    # Parse the OpenAI output
+    parsed = parse_openai_response(request.completed_step_output)
+
+    # Find the running step to complete
+    result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).eq('status', 'running').execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail=f"Running step not found: {request.completed_step_name}")
+
+    completed_step = result.data[0]
+
+    # Store the completed step output
+    repo.update_pipeline_step(completed_step['step_id'], {
+        "status": "completed",
+        "output": parsed['full_output'],  # Store full response
+        "tokens_used": parsed['tokens_used'],
+        "runtime_seconds": parsed['runtime_seconds'],
+        "completed_at": datetime.now().isoformat()
+    })
+
+    # Now prepare the next step (same logic as /steps/prepare but for one step)
+    run = repo.get_run(request.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run not found: {request.run_id}")
+
+    client = repo.get_client(request.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+
+    # Get prompt for next step
+    prompt = repo.get_prompt_by_step(request.next_step_name)
+    if not prompt:
+        raise HTTPException(status_code=404, detail=f"Prompt not found for step: {request.next_step_name}")
+
+    # Generate step_id
+    existing_steps = repo.client.table('v2_pipeline_steps').select('step_id').eq('run_id', request.run_id).execute()
+    step_num = len(existing_steps.data) + 1
+    next_step_id = f"STEP_{request.run_id}_{step_num:02d}"
+
+    # Build input
+    step_input = {
+        "current_date": datetime.now().strftime("%Y-%m-%d"),
+        "icp_config_compressed": client.get('icp_config_compressed'),
+        "industry_research_compressed": client.get('industry_research_compressed'),
+        "research_context_compressed": client.get('research_context_compressed'),
+        "client_specific_research": client.get('client_specific_research'),
+        "seed_data": run.get('seed_data'),
+        "dossier_id": request.dossier_id
+    }
+
+    # AUTO-FETCH: Add previous step output
+    if request.next_step_name == "2_SIGNAL_DISCOVERY":
+        search_output = repo.get_completed_step(request.run_id, "1_SEARCH_BUILDER")
+        if search_output:
+            step_input["search_builder_output"] = search_output.get('output')
+
+    if "CLAIM" in request.next_step_name.upper() or request.next_step_name == "PRODUCE_CLAIMS":
+        signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+        if signal_output:
+            step_input["signal_discovery_output"] = signal_output.get('output')
+
+    # Get model
+    model_map = {
+        "1_SEARCH_BUILDER": "o4-mini",
+        "2_SIGNAL_DISCOVERY": "gpt-4.1",
+        "PRODUCE_CLAIMS": "gpt-4.1"
+    }
+    model_used = model_map.get(request.next_step_name, "gpt-4.1")
+
+    # Log next step as "running"
+    repo.create_pipeline_step({
+        "step_id": next_step_id,
+        "run_id": request.run_id,
+        "prompt_id": prompt['prompt_id'],
+        "step_name": request.next_step_name,
+        "status": "running",
+        "input": step_input,
+        "model_used": model_used,
+        "started_at": datetime.now().isoformat()
+    })
+
+    # Prepare response
+    next_step_prepared = PreparedStep(
+        step_id=next_step_id,
+        step_name=request.next_step_name,
+        prompt_id=prompt['prompt_id'],
+        prompt_slug=prompt['prompt_slug'],
+        prompt_template=prompt['prompt_template'],
+        model_used=model_used,
+        input=step_input,
+        produce_claims=prompt.get('produce_claims', False)
+    )
+
+    return StepTransitionResponse(
+        success=True,
+        run_id=request.run_id,
+        completed_step=request.completed_step_name,
+        tokens_used=parsed['tokens_used'],
+        runtime_seconds=parsed['runtime_seconds'],
+        next_step=next_step_prepared
     )
 
 
