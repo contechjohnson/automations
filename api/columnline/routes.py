@@ -80,6 +80,47 @@ def parse_openai_response(openai_output):
     }
 
 
+def extract_clean_content(openai_output):
+    """
+    Extract ONLY the clean content for passing to next step's input
+
+    Removes all metadata, nested arrays, and irrelevant fields.
+    Returns just what the next LLM needs to see.
+
+    Handles different response formats:
+    - Claims Extraction: Returns the claims array
+    - Deep Research: Returns the narrative text
+    - Context Pack: Returns the context pack content
+    """
+    # If it's an array, take first element
+    if isinstance(openai_output, list):
+        openai_output = openai_output[0]
+
+    # Pattern 1: Claims Extraction format - has "result.claims"
+    if 'result' in openai_output and isinstance(openai_output['result'], dict):
+        if 'claims' in openai_output['result']:
+            return openai_output['result']['claims']  # Just the claims array
+        return openai_output['result']  # Or the whole result object if no claims
+
+    # Pattern 2: Deep Research format - has "output" array with message content
+    if 'output' in openai_output and isinstance(openai_output['output'], list):
+        # Find the message content (skip reasoning/web_search_call)
+        for output_item in openai_output['output']:
+            if output_item.get('type') == 'message' and output_item.get('status') == 'completed':
+                content = output_item.get('content', [])
+                if content and isinstance(content, list):
+                    for content_item in content:
+                        if content_item.get('type') == 'output_text':
+                            return content_item.get('text', '')  # Just the text
+
+    # Pattern 3: Simple text response (fallback)
+    if 'text' in openai_output:
+        return openai_output['text']
+
+    # Fallback: return the whole thing if we can't parse it
+    return openai_output
+
+
 # ============================================================================
 # CONFIG ENDPOINTS (for sub-scenarios)
 # ============================================================================
@@ -493,17 +534,19 @@ async def prepare_steps(request: StepPrepareRequest):
         }
 
         # AUTO-FETCH: Get outputs from previous steps that this step depends on
+        # Extract clean content (no metadata) for LLM consumption
+
         # Signal Discovery needs Search Builder output
         if step_name == "2_SIGNAL_DISCOVERY":
             search_output = repo.get_completed_step(request.run_id, "1_SEARCH_BUILDER")
             if search_output:
-                step_input["search_builder_output"] = search_output.get('output')
+                step_input["search_builder_output"] = extract_clean_content(search_output.get('output'))
 
         # Entity Research needs Signal Discovery output
         if step_name == "3_ENTITY_RESEARCH":
             signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
             if signal_output:
-                step_input["signal_discovery_output"] = signal_output.get('output')
+                step_input["signal_discovery_output"] = extract_clean_content(signal_output.get('output'))
 
         # Claims extraction needs the previous research output
         if "CLAIM" in step_name.upper() or step_name == "CLAIMS_EXTRACTION":
@@ -511,7 +554,7 @@ async def prepare_steps(request: StepPrepareRequest):
             for research_step in ["4_CONTACT_DISCOVERY", "3_ENTITY_RESEARCH", "2_SIGNAL_DISCOVERY"]:
                 research_output = repo.get_completed_step(request.run_id, research_step)
                 if research_output:
-                    step_input[f"{research_step.lower()}_output"] = research_output.get('output')
+                    step_input[f"{research_step.lower()}_output"] = extract_clean_content(research_output.get('output'))
                     break  # Use most recent research step
 
         # Get model from prompt (defaulting to gpt-4.1)
@@ -732,23 +775,26 @@ async def transition_step(request: StepTransitionRequest):
 
     # AUTO-FETCH: Add previous step output based on the transition
     # Use just-completed output when possible (cleaner than fetching from DB)
+    # Extract CLEAN content (no metadata) for next step's input
+
+    clean_output = extract_clean_content(request.completed_step_output)
 
     if request.next_step_name == "2_SIGNAL_DISCOVERY":
         # Signal Discovery needs Search Builder (just completed)
-        step_input["search_builder_output"] = parsed['full_output']
+        step_input["search_builder_output"] = clean_output
 
     if request.next_step_name == "CLAIMS_EXTRACTION":
         # Claims needs the research output (just completed)
         if request.completed_step_name in ["3_ENTITY_RESEARCH", "4_CONTACT_DISCOVERY", "2_SIGNAL_DISCOVERY"]:
-            step_input[f"{request.completed_step_name.lower()}_output"] = parsed['full_output']
+            step_input[f"{request.completed_step_name.lower()}_output"] = clean_output
 
     if request.next_step_name == "CONTEXT_PACK":
         # Context pack needs the claims (just completed)
-        step_input["claims_output"] = parsed['full_output']
+        step_input["claims_output"] = clean_output
 
     if request.next_step_name == "4_CONTACT_DISCOVERY":
         # Contact discovery needs the entity context pack (just completed)
-        step_input["entity_context_pack"] = parsed['full_output']
+        step_input["entity_context_pack"] = clean_output
 
     # Get model
     model_map = {
