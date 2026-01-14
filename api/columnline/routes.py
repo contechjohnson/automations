@@ -557,12 +557,21 @@ async def prepare_steps(request: StepPrepareRequest):
                     step_input[f"{research_step.lower()}_output"] = extract_clean_content(research_output.get('output'))
                     break  # Use most recent research step
 
+        # Enrich steps need entity research output
+        if step_name in ["5A_ENRICH_LEAD", "5B_ENRICH_OPPORTUNITY", "5C_CLIENT_SPECIFIC"]:
+            entity_output = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity_output:
+                step_input["entity_research_output"] = extract_clean_content(entity_output.get('output'))
+
         # Get model from prompt (defaulting to gpt-4.1)
         model_map = {
             "1_SEARCH_BUILDER": "o4-mini",
             "2_SIGNAL_DISCOVERY": "gpt-4.1",
             "3_ENTITY_RESEARCH": "o4-mini-deep-research",
             "4_CONTACT_DISCOVERY": "o4-mini-deep-research",
+            "5A_ENRICH_LEAD": "gpt-4.1",
+            "5B_ENRICH_OPPORTUNITY": "gpt-4.1",
+            "5C_CLIENT_SPECIFIC": "gpt-4.1",
             "CLAIMS_EXTRACTION": "gpt-4.1",
             "CONTEXT_PACK": "gpt-4.1"
         }
@@ -796,12 +805,21 @@ async def transition_step(request: StepTransitionRequest):
         # Contact discovery needs the entity context pack (just completed)
         step_input["entity_context_pack"] = clean_output
 
+    if request.next_step_name in ["5A_ENRICH_LEAD", "5B_ENRICH_OPPORTUNITY", "5C_CLIENT_SPECIFIC"]:
+        # Enrich steps need entity research output (fetch from DB)
+        entity_output = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+        if entity_output:
+            step_input["entity_research_output"] = extract_clean_content(entity_output.get('output'))
+
     # Get model
     model_map = {
         "1_SEARCH_BUILDER": "o4-mini",
         "2_SIGNAL_DISCOVERY": "gpt-4.1",
         "3_ENTITY_RESEARCH": "o4-mini-deep-research",
         "4_CONTACT_DISCOVERY": "o4-mini-deep-research",
+        "5A_ENRICH_LEAD": "gpt-4.1",
+        "5B_ENRICH_OPPORTUNITY": "gpt-4.1",
+        "5C_CLIENT_SPECIFIC": "gpt-4.1",
         "CLAIMS_EXTRACTION": "gpt-4.1",
         "CONTEXT_PACK": "gpt-4.1"
     }
