@@ -232,11 +232,11 @@ class StepPrepareResponse(BaseModel):
 
 
 class StepOutputItem(BaseModel):
-    """Single step output to store"""
+    """Single step output to store - pass full OpenAI response, we'll parse it"""
     step_name: str
-    output: Dict[str, Any]
-    tokens_used: Optional[int] = None
-    runtime_seconds: Optional[float] = None
+    output: Any = Field(..., description="Full OpenAI response - we extract tokens/runtime automatically")
+    tokens_used: Optional[int] = None  # Optional - will be extracted if not provided
+    runtime_seconds: Optional[float] = None  # Optional - will be extracted if not provided
 
 
 class StepCompleteRequest(BaseModel):

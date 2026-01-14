@@ -546,36 +546,37 @@ async def prepare_steps(request: StepPrepareRequest):
 @router.post("/steps/complete", response_model=StepCompleteResponse)
 async def complete_steps(request: StepCompleteRequest):
     """
-    Store outputs for completed steps (supports single or multiple)
+    Store outputs for completed steps - JUST PASS THE ENTIRE OPENAI RESPONSE
 
-    ISOLATED TESTING - Complete one step at a time:
+    Make.com usage (final step):
         [1] POST /steps/complete
             Body: {
                 "run_id": "RUN_20260114_002901",
-                "outputs": [
-                    {
-                        "step_name": "1_SEARCH_BUILDER",
-                        "output": {{llm_response}},
-                        "tokens_used": {{tokens}},
-                        "runtime_seconds": {{runtime}}
-                    }
-                ]
+                "outputs": [{
+                    "step_name": "CLAIMS_EXTRACTION",
+                    "output": {{6}}  // <-- Pass ENTIRE OpenAI response
+                }]
             }
+
+        We automatically extract:
+        - tokens_used from response.usage
+        - runtime_seconds from response timestamps
+        - Full output stored for debugging
 
         [2] Response:
             {
                 "success": true,
                 "run_id": "RUN_20260114_002901",
-                "steps_completed": ["1_SEARCH_BUILDER"],
+                "steps_completed": ["CLAIMS_EXTRACTION"],
                 "message": "1 step(s) completed successfully"
             }
 
-    BATCHED (if you want):
+    BATCHED (if you want to complete multiple at once):
         Body: {
             "run_id": "...",
             "outputs": [
-                {"step_name": "1_SEARCH_BUILDER", "output": {...}},
-                {"step_name": "2_SIGNAL_DISCOVERY", "output": {...}}
+                {"step_name": "STEP_A", "output": {{response_a}}},
+                {"step_name": "STEP_B", "output": {{response_b}}}
             ]
         }
     """
@@ -595,12 +596,23 @@ async def complete_steps(request: StepCompleteRequest):
         if not step:
             raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_name}")
 
+        # AUTO-PARSE: If tokens/runtime not provided, extract from output
+        tokens_used = output_item.tokens_used
+        runtime_seconds = output_item.runtime_seconds
+        output_to_store = output_item.output
+
+        if tokens_used is None or runtime_seconds is None:
+            parsed = parse_openai_response(output_item.output)
+            tokens_used = parsed['tokens_used'] if tokens_used is None else tokens_used
+            runtime_seconds = parsed['runtime_seconds'] if runtime_seconds is None else runtime_seconds
+            output_to_store = parsed['full_output']
+
         # Update step to completed
         repo.update_pipeline_step(step['step_id'], {
             "status": "completed",
-            "output": output_item.output,
-            "tokens_used": output_item.tokens_used,
-            "runtime_seconds": output_item.runtime_seconds,
+            "output": output_to_store,
+            "tokens_used": tokens_used,
+            "runtime_seconds": runtime_seconds,
             "completed_at": datetime.now().isoformat()
         })
 
