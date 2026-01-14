@@ -500,7 +500,7 @@ async def prepare_steps(request: StepPrepareRequest):
                 step_input["search_builder_output"] = search_output.get('output')
 
         # Claims extraction would need Signal Discovery output
-        if "CLAIM" in step_name.upper() or step_name == "PRODUCE_CLAIMS":
+        if "CLAIM" in step_name.upper() or step_name == "CLAIMS_EXTRACTION":
             signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
             if signal_output:
                 step_input["signal_discovery_output"] = signal_output.get('output')
@@ -509,7 +509,8 @@ async def prepare_steps(request: StepPrepareRequest):
         # TODO: Add model field to v2_prompts table, or have Make.com specify it
         model_map = {
             "1_SEARCH_BUILDER": "o4-mini",
-            "2_SIGNAL_DISCOVERY": "gpt-4.1"
+            "2_SIGNAL_DISCOVERY": "gpt-4.1",
+            "CLAIMS_EXTRACTION": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -710,7 +711,7 @@ async def transition_step(request: StepTransitionRequest):
         if search_output:
             step_input["search_builder_output"] = search_output.get('output')
 
-    if "CLAIM" in request.next_step_name.upper() or request.next_step_name == "PRODUCE_CLAIMS":
+    if "CLAIM" in request.next_step_name.upper() or request.next_step_name == "CLAIMS_EXTRACTION":
         signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
         if signal_output:
             step_input["signal_discovery_output"] = signal_output.get('output')
@@ -719,7 +720,7 @@ async def transition_step(request: StepTransitionRequest):
     model_map = {
         "1_SEARCH_BUILDER": "o4-mini",
         "2_SIGNAL_DISCOVERY": "gpt-4.1",
-        "PRODUCE_CLAIMS": "gpt-4.1"
+        "CLAIMS_EXTRACTION": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
