@@ -355,44 +355,54 @@ async def prepare_steps(request: StepPrepareRequest):
     """
     Prepare inputs for one or more steps - API BUILDS THE INPUTS
 
-    Make.com usage:
-        [1] HTTP POST /columnline/steps/prepare
+    ISOLATED TESTING - Prepare one step at a time:
+        [1] Prepare Search Builder:
+            POST /columnline/steps/prepare
             Body: {
                 "run_id": "RUN_20260114_002901",
                 "client_id": "CLT_EXAMPLE_001",
                 "dossier_id": "DOSS_20260114_1550",
-                "step_names": ["1_SEARCH_BUILDER", "2_SIGNAL_DISCOVERY"]
+                "step_names": ["1_SEARCH_BUILDER"]
             }
 
-        [2] Response:
-            {
+        [2] Run Search Builder LLM
+        [3] POST /steps/complete with output
+
+        [4] Prepare Signal Discovery (auto-fetches Search Builder output):
+            POST /columnline/steps/prepare
+            Body: {
                 "run_id": "RUN_20260114_002901",
-                "steps": [
-                    {
-                        "step_id": "STEP_RUN_20260114_002901_01",
-                        "step_name": "1_SEARCH_BUILDER",
-                        "prompt_id": "PRM_001",
-                        "prompt_slug": "search-builder",
-                        "prompt_template": "### Role\\n...",
-                        "model_used": "o4-mini",
-                        "input": {
-                            "current_date": "2026-01-14",
-                            "icp_config_compressed": {...},
-                            "research_context_compressed": {...},
-                            "seed_data": {...}
-                        },
-                        "produce_claims": false
-                    },
-                    {...}
-                ]
+                "client_id": "CLT_EXAMPLE_001",
+                "dossier_id": "DOSS_20260114_1550",
+                "step_names": ["2_SIGNAL_DISCOVERY"]
             }
 
-        [3] For each step, call OpenAI with:
-            System: {{steps[0].prompt_template}}
-            User: {{toString(steps[0].input)}}
-            Model: {{steps[0].model_used}}
+            Response includes:
+            {
+                "input": {
+                    ...base configs...,
+                    "search_builder_output": {...}  <-- AUTO-FETCHED
+                }
+            }
 
-        [4] Then POST outputs back (see /steps/complete)
+        [5] Run Signal Discovery LLM
+        [6] POST /steps/complete with output
+
+        [7] Prepare Claims Extraction (auto-fetches Signal Discovery output):
+            POST /columnline/steps/prepare
+            Body: {
+                "step_names": ["PRODUCE_CLAIMS"]
+            }
+
+            Response includes signal_discovery_output in input
+
+    AUTO-FETCH LOGIC:
+    - Signal Discovery gets search_builder_output automatically
+    - Claims steps get signal_discovery_output automatically
+    - API fetches completed previous steps you need
+
+    BATCHED (if you want to skip isolated testing):
+        step_names: ["1_SEARCH_BUILDER", "2_SIGNAL_DISCOVERY"]
     """
     # Verify run exists
     run = repo.get_run(request.run_id)
@@ -412,10 +422,12 @@ async def prepare_steps(request: StepPrepareRequest):
         if not prompt:
             raise HTTPException(status_code=404, detail=f"Prompt not found for step: {step_name}")
 
-        # Generate step_id
-        step_id = f"STEP_{request.run_id}_{idx:02d}"
+        # Generate step_id (use actual step count from DB to avoid conflicts)
+        existing_steps = repo.client.table('v2_pipeline_steps').select('step_id').eq('run_id', request.run_id).execute()
+        step_num = len(existing_steps.data) + 1
+        step_id = f"STEP_{request.run_id}_{step_num:02d}"
 
-        # Build input (merge client config + seed data)
+        # Build base input (client config + seed data)
         step_input = {
             "current_date": datetime.now().strftime("%Y-%m-%d"),
             "icp_config_compressed": client.get('icp_config_compressed'),
@@ -425,6 +437,19 @@ async def prepare_steps(request: StepPrepareRequest):
             "seed_data": run.get('seed_data'),
             "dossier_id": request.dossier_id
         }
+
+        # AUTO-FETCH: Get outputs from previous steps that this step depends on
+        # Signal Discovery needs Search Builder output
+        if step_name == "2_SIGNAL_DISCOVERY":
+            search_output = repo.get_completed_step(request.run_id, "1_SEARCH_BUILDER")
+            if search_output:
+                step_input["search_builder_output"] = search_output.get('output')
+
+        # Claims extraction would need Signal Discovery output
+        if "CLAIM" in step_name.upper() or step_name == "PRODUCE_CLAIMS":
+            signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal_output:
+                step_input["signal_discovery_output"] = signal_output.get('output')
 
         # Get model from prompt (defaulting to gpt-4.1)
         # TODO: Add model field to v2_prompts table, or have Make.com specify it
@@ -466,21 +491,15 @@ async def prepare_steps(request: StepPrepareRequest):
 @router.post("/steps/complete", response_model=StepCompleteResponse)
 async def complete_steps(request: StepCompleteRequest):
     """
-    Store outputs for completed steps
+    Store outputs for completed steps (supports single or multiple)
 
-    Make.com usage:
-        [1] After running LLM calls, POST outputs:
+    ISOLATED TESTING - Complete one step at a time:
+        [1] POST /steps/complete
             Body: {
                 "run_id": "RUN_20260114_002901",
                 "outputs": [
                     {
                         "step_name": "1_SEARCH_BUILDER",
-                        "output": {{llm_response}},
-                        "tokens_used": {{tokens}},
-                        "runtime_seconds": {{runtime}}
-                    },
-                    {
-                        "step_name": "2_SIGNAL_DISCOVERY",
                         "output": {{llm_response}},
                         "tokens_used": {{tokens}},
                         "runtime_seconds": {{runtime}}
@@ -492,9 +511,18 @@ async def complete_steps(request: StepCompleteRequest):
             {
                 "success": true,
                 "run_id": "RUN_20260114_002901",
-                "steps_completed": ["1_SEARCH_BUILDER", "2_SIGNAL_DISCOVERY"],
-                "message": "Steps completed successfully"
+                "steps_completed": ["1_SEARCH_BUILDER"],
+                "message": "1 step(s) completed successfully"
             }
+
+    BATCHED (if you want):
+        Body: {
+            "run_id": "...",
+            "outputs": [
+                {"step_name": "1_SEARCH_BUILDER", "output": {...}},
+                {"step_name": "2_SIGNAL_DISCOVERY", "output": {...}}
+            ]
+        }
     """
     # Find step_ids for these step names
     completed_steps = []
