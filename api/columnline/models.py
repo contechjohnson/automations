@@ -199,3 +199,55 @@ class SuccessResponse(BaseModel):
     success: bool = True
     message: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
+
+
+# ============================================================================
+# BATCH STEP EXECUTION MODELS
+# ============================================================================
+
+class StepPrepareRequest(BaseModel):
+    """Prepare inputs for one or more steps"""
+    run_id: str
+    client_id: str
+    dossier_id: str
+    step_names: List[str] = Field(..., description="Steps to prepare (e.g., ['1_SEARCH_BUILDER', '2_SIGNAL_DISCOVERY'])")
+
+
+class PreparedStep(BaseModel):
+    """Single prepared step with input ready"""
+    step_id: str
+    step_name: str
+    prompt_id: str
+    prompt_slug: str
+    prompt_template: str
+    model_used: str
+    input: Dict[str, Any]
+    produce_claims: bool
+
+
+class StepPrepareResponse(BaseModel):
+    """Response with all prepared steps"""
+    run_id: str
+    steps: List[PreparedStep]
+
+
+class StepOutputItem(BaseModel):
+    """Single step output to store"""
+    step_name: str
+    output: Dict[str, Any]
+    tokens_used: Optional[int] = None
+    runtime_seconds: Optional[float] = None
+
+
+class StepCompleteRequest(BaseModel):
+    """Store outputs for completed steps"""
+    run_id: str
+    outputs: List[StepOutputItem]
+
+
+class StepCompleteResponse(BaseModel):
+    """Response after storing outputs"""
+    success: bool = True
+    run_id: str
+    steps_completed: List[str]
+    message: str = "Steps completed successfully"

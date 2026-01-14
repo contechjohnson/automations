@@ -17,7 +17,9 @@ from .models import (
     ClaimsCreate,
     ConfigsResponse, ClientConfig, PromptConfig,
     OutputsResponse, StepOutput,
-    SuccessResponse
+    SuccessResponse,
+    StepPrepareRequest, StepPrepareResponse, PreparedStep,
+    StepCompleteRequest, StepCompleteResponse, StepOutputItem
 )
 
 router = APIRouter(prefix="/columnline", tags=["columnline"])
@@ -342,6 +344,191 @@ async def get_claims(run_id: str):
         "claims": claims,
         "count": len(claims)
     }
+
+
+# ============================================================================
+# BATCH STEP EXECUTION (Prepare + Complete)
+# ============================================================================
+
+@router.post("/steps/prepare", response_model=StepPrepareResponse)
+async def prepare_steps(request: StepPrepareRequest):
+    """
+    Prepare inputs for one or more steps - API BUILDS THE INPUTS
+
+    Make.com usage:
+        [1] HTTP POST /columnline/steps/prepare
+            Body: {
+                "run_id": "RUN_20260114_002901",
+                "client_id": "CLT_EXAMPLE_001",
+                "dossier_id": "DOSS_20260114_1550",
+                "step_names": ["1_SEARCH_BUILDER", "2_SIGNAL_DISCOVERY"]
+            }
+
+        [2] Response:
+            {
+                "run_id": "RUN_20260114_002901",
+                "steps": [
+                    {
+                        "step_id": "STEP_RUN_20260114_002901_01",
+                        "step_name": "1_SEARCH_BUILDER",
+                        "prompt_id": "PRM_001",
+                        "prompt_slug": "search-builder",
+                        "prompt_template": "### Role\\n...",
+                        "model_used": "o4-mini",
+                        "input": {
+                            "current_date": "2026-01-14",
+                            "icp_config_compressed": {...},
+                            "research_context_compressed": {...},
+                            "seed_data": {...}
+                        },
+                        "produce_claims": false
+                    },
+                    {...}
+                ]
+            }
+
+        [3] For each step, call OpenAI with:
+            System: {{steps[0].prompt_template}}
+            User: {{toString(steps[0].input)}}
+            Model: {{steps[0].model_used}}
+
+        [4] Then POST outputs back (see /steps/complete)
+    """
+    # Verify run exists
+    run = repo.get_run(request.run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run not found: {request.run_id}")
+
+    # Fetch client config
+    client = repo.get_client(request.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+
+    # Prepare each step
+    prepared_steps = []
+    for idx, step_name in enumerate(request.step_names, 1):
+        # Get prompt for this step
+        prompt = repo.get_prompt_by_step(step_name)
+        if not prompt:
+            raise HTTPException(status_code=404, detail=f"Prompt not found for step: {step_name}")
+
+        # Generate step_id
+        step_id = f"STEP_{request.run_id}_{idx:02d}"
+
+        # Build input (merge client config + seed data)
+        step_input = {
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
+            "icp_config_compressed": client.get('icp_config_compressed'),
+            "industry_research_compressed": client.get('industry_research_compressed'),
+            "research_context_compressed": client.get('research_context_compressed'),
+            "client_specific_research": client.get('client_specific_research'),
+            "seed_data": run.get('seed_data'),
+            "dossier_id": request.dossier_id
+        }
+
+        # Get model from prompt (defaulting to gpt-4.1)
+        # TODO: Add model field to v2_prompts table, or have Make.com specify it
+        model_map = {
+            "1_SEARCH_BUILDER": "o4-mini",
+            "2_SIGNAL_DISCOVERY": "gpt-4.1"
+        }
+        model_used = model_map.get(step_name, "gpt-4.1")
+
+        prepared_steps.append(PreparedStep(
+            step_id=step_id,
+            step_name=step_name,
+            prompt_id=prompt['prompt_id'],
+            prompt_slug=prompt['prompt_slug'],
+            prompt_template=prompt['prompt_template'],
+            model_used=model_used,
+            input=step_input,
+            produce_claims=prompt.get('produce_claims', False)
+        ))
+
+        # Log step as "running" in database
+        repo.create_pipeline_step({
+            "step_id": step_id,
+            "run_id": request.run_id,
+            "prompt_id": prompt['prompt_id'],
+            "step_name": step_name,
+            "status": "running",
+            "input": step_input,
+            "model_used": model_used,
+            "started_at": datetime.now().isoformat()
+        })
+
+    return StepPrepareResponse(
+        run_id=request.run_id,
+        steps=prepared_steps
+    )
+
+
+@router.post("/steps/complete", response_model=StepCompleteResponse)
+async def complete_steps(request: StepCompleteRequest):
+    """
+    Store outputs for completed steps
+
+    Make.com usage:
+        [1] After running LLM calls, POST outputs:
+            Body: {
+                "run_id": "RUN_20260114_002901",
+                "outputs": [
+                    {
+                        "step_name": "1_SEARCH_BUILDER",
+                        "output": {{llm_response}},
+                        "tokens_used": {{tokens}},
+                        "runtime_seconds": {{runtime}}
+                    },
+                    {
+                        "step_name": "2_SIGNAL_DISCOVERY",
+                        "output": {{llm_response}},
+                        "tokens_used": {{tokens}},
+                        "runtime_seconds": {{runtime}}
+                    }
+                ]
+            }
+
+        [2] Response:
+            {
+                "success": true,
+                "run_id": "RUN_20260114_002901",
+                "steps_completed": ["1_SEARCH_BUILDER", "2_SIGNAL_DISCOVERY"],
+                "message": "Steps completed successfully"
+            }
+    """
+    # Find step_ids for these step names
+    completed_steps = []
+
+    for output_item in request.outputs:
+        # Find the pipeline step
+        step = repo.get_completed_step(request.run_id, output_item.step_name)
+
+        # If not found, try to find the "running" step
+        if not step:
+            result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', output_item.step_name).eq('status', 'running').execute()
+            if result.data:
+                step = result.data[0]
+
+        if not step:
+            raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_name}")
+
+        # Update step to completed
+        repo.update_pipeline_step(step['step_id'], {
+            "status": "completed",
+            "output": output_item.output,
+            "tokens_used": output_item.tokens_used,
+            "runtime_seconds": output_item.runtime_seconds,
+            "completed_at": datetime.now().isoformat()
+        })
+
+        completed_steps.append(output_item.step_name)
+
+    return StepCompleteResponse(
+        success=True,
+        run_id=request.run_id,
+        steps_completed=completed_steps,
+        message=f"{len(completed_steps)} step(s) completed successfully"
+    )
 
 
 # ============================================================================

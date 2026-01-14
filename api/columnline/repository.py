@@ -48,6 +48,14 @@ class ColumnlineRepository:
             return result.data[0]
         return None
 
+    def get_prompt_by_step(self, step_name: str) -> Optional[Dict[str, Any]]:
+        """Fetch prompt by step name (e.g., '1_SEARCH_BUILDER')"""
+        result = self.client.table('v2_prompts').select('*').eq('step', step_name).execute()
+
+        if result.data:
+            return result.data[0]
+        return None
+
     # ========================================================================
     # RUNS (Run Management)
     # ========================================================================
