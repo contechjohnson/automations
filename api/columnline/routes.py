@@ -521,7 +521,7 @@ async def prepare_steps(request: StepPrepareRequest):
             "3_ENTITY_RESEARCH": "o4-mini-deep-research",
             "4_CONTACT_DISCOVERY": "o4-mini-deep-research",
             "CLAIMS_EXTRACTION": "gpt-4.1",
-            "CONTEXT_PACK_BUILDER": "gpt-4.1"
+            "CONTEXT_PACK": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -740,7 +740,7 @@ async def transition_step(request: StepTransitionRequest):
         if request.completed_step_name in ["3_ENTITY_RESEARCH", "4_CONTACT_DISCOVERY", "2_SIGNAL_DISCOVERY"]:
             step_input[f"{request.completed_step_name.lower()}_output"] = parsed['full_output']
 
-    if request.next_step_name == "CONTEXT_PACK_BUILDER":
+    if request.next_step_name == "CONTEXT_PACK":
         # Context pack needs the claims (just completed)
         step_input["claims_output"] = parsed['full_output']
 
@@ -755,7 +755,7 @@ async def transition_step(request: StepTransitionRequest):
         "3_ENTITY_RESEARCH": "o4-mini-deep-research",
         "4_CONTACT_DISCOVERY": "o4-mini-deep-research",
         "CLAIMS_EXTRACTION": "gpt-4.1",
-        "CONTEXT_PACK_BUILDER": "gpt-4.1"
+        "CONTEXT_PACK": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
