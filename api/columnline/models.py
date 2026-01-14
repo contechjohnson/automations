@@ -13,8 +13,37 @@ from pydantic import BaseModel, Field
 # RUN MODELS
 # ============================================================================
 
+class RunStartRequest(BaseModel):
+    """Start a new dossier run - main pipeline input"""
+    client_id: str
+    seed_data: Dict[str, Any] = Field(..., description="Company/signal to research")
+    triggered_by: str = Field(default="make.com", description="Source that triggered the run")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "client_id": "CLT_EXAMPLE_001",
+                "seed_data": {
+                    "company_name": "Acme Construction",
+                    "signal": "Permit filed for $5M expansion"
+                },
+                "triggered_by": "make.com"
+            }
+        }
+
+
+class RunStartResponse(BaseModel):
+    """Response from starting a run"""
+    success: bool = True
+    run_id: str
+    dossier_id: str
+    client_id: str
+    started_at: datetime
+    message: str = "Run created successfully"
+
+
 class RunCreate(BaseModel):
-    """Create a new dossier run"""
+    """Create a new dossier run (internal use)"""
     run_id: str
     client_id: str
     status: str = "running"

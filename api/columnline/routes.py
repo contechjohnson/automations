@@ -11,6 +11,7 @@ from datetime import datetime
 
 from .repository import ColumnlineRepository
 from .models import (
+    RunStartRequest, RunStartResponse,
     RunCreate, RunUpdate, RunStatus,
     PipelineStepCreate, PipelineStepUpdate, PipelineStepComplete,
     ClaimsCreate,
@@ -95,6 +96,67 @@ async def get_outputs(
 # ============================================================================
 # RUN MANAGEMENT ENDPOINTS
 # ============================================================================
+
+@router.post("/runs/start", response_model=RunStartResponse)
+async def start_run(request: RunStartRequest):
+    """
+    Start a new dossier run - MAIN PIPELINE ENTRY POINT
+
+    Make.com usage:
+        [1] Webhook receives: {client_id, seed}
+        [2] HTTP POST /columnline/runs/start
+            Body: {
+                "client_id": "CLT_EXAMPLE_001",
+                "seed_data": {
+                    "company_name": "Acme Construction",
+                    "signal": "Permit filed for $5M expansion"
+                },
+                "triggered_by": "make.com"
+            }
+        [3] Response:
+            {
+                "run_id": "RUN_20260113_143022",
+                "dossier_id": "DOSS_20260113_9472",
+                "client_id": "CLT_EXAMPLE_001",
+                "started_at": "2026-01-13T14:30:22Z"
+            }
+        [4] Use {{1.run_id}} and {{1.dossier_id}} for tracking
+    """
+    from datetime import datetime
+    import random
+
+    # Generate IDs
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = f"RUN_{timestamp}"
+    dossier_id = f"DOSS_{datetime.now().strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
+
+    # Verify client exists
+    client = repo.get_client(request.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+
+    # Create run
+    run_data = {
+        "run_id": run_id,
+        "client_id": request.client_id,
+        "status": "running",
+        "seed_data": request.seed_data,
+        "dossier_id": dossier_id,
+        "triggered_by": request.triggered_by,
+        "config_snapshot": None  # Could snapshot client config here
+    }
+
+    result = repo.create_run(run_data)
+
+    return RunStartResponse(
+        success=True,
+        run_id=run_id,
+        dossier_id=dossier_id,
+        client_id=request.client_id,
+        started_at=result['started_at'],
+        message="Run started successfully"
+    )
+
 
 @router.post("/runs", response_model=SuccessResponse)
 async def create_run(run: RunCreate):
