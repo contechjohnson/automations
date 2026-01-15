@@ -608,6 +608,12 @@ async def prepare_steps(request: StepPrepareRequest):
                 elif '5c_client_specific_output' in step_input_data:
                     step_input["client_specific_claims"] = claims_output
 
+        # Dossier Plan needs the context pack from 07B
+        if step_name == "DOSSIER_PLAN":
+            context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
+            if context_pack_output:
+                step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
+
         # Merge Claims needs ALL claims including insight claims
         if step_name == "MERGE_CLAIMS":
             # Find all completed claims extraction steps
@@ -646,7 +652,8 @@ async def prepare_steps(request: StepPrepareRequest):
             "07B_INSIGHT": "gpt-4.1",
             "MERGE_CLAIMS": "gpt-4.1",
             "CLAIMS_EXTRACTION": "gpt-4.1",
-            "CONTEXT_PACK": "gpt-4.1"
+            "CONTEXT_PACK": "gpt-4.1",
+            "DOSSIER_PLAN": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -971,7 +978,8 @@ async def transition_step(request: StepTransitionRequest):
         "07B_INSIGHT": "gpt-4.1",
         "MERGE_CLAIMS": "gpt-4.1",
         "CLAIMS_EXTRACTION": "gpt-4.1",
-        "CONTEXT_PACK": "gpt-4.1"
+        "CONTEXT_PACK": "gpt-4.1",
+        "DOSSIER_PLAN": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
