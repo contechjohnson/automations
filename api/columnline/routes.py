@@ -822,11 +822,12 @@ async def complete_steps(request: StepCompleteRequest):
         if output_item.step_name == "6_ENRICH_CONTACTS":
             clean_content = extract_clean_content(output_to_store)
             if isinstance(clean_content, dict):
-                # Check for both "enriched_contacts" and "contacts" field names
-                if "enriched_contacts" in clean_content:
-                    contacts_array = clean_content["enriched_contacts"]
-                elif "contacts" in clean_content:
+                # Check for both "contacts" (new format) and "enriched_contacts" (old format)
+                if "contacts" in clean_content:
                     contacts_array = clean_content["contacts"]
+                elif "enriched_contacts" in clean_content:
+                    # Backward compatibility with old prompt format
+                    contacts_array = clean_content["enriched_contacts"]
                 else:
                     contacts_array = []
             elif isinstance(clean_content, list):

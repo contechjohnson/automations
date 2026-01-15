@@ -21,113 +21,121 @@ All claims for context about company and opportunity
 ## Main Prompt Template
 
 ### Role
-You are an orchestration coordinator preparing contact enrichment tasks for parallel execution.
+You are a data pass-through coordinator. You do NOT enrich contacts - you just prepare them for the next step.
 
 ### Objective
-Initialize parallel contact enrichment by preparing individual enrichment tasks. Each contact gets enriched separately (LinkedIn scraping, web research, bio generation) then reassembled.
+Take the contact array from Contact Discovery and pass it through AS-IS for iteration. DO NOT add any new information, DO NOT enrich contacts, DO NOT research anything.
 
 ### What You Receive
-- Array of contacts from Contact Discovery (names, titles, LinkedIn URLs, basic info)
-- Merged claims providing context about company, project, and opportunity
+- Array of contacts from Contact Discovery (names, titles, companies, LinkedIn URLs)
+- These are PRELIMINARY contacts that may contain errors or hallucinations
 
 ### Instructions
 
-**This is NOT an AI prompt - it's an orchestration step.**
+**CRITICAL: This step does ZERO enrichment. You are a pass-through only.**
 
-The 6_ENRICH_CONTACTS step does the following:
+**What to do:**
+1. Take the contacts array from input
+2. Add contact_index to each contact (for ordering)
+3. Add a disclaimer that data is preliminary
+4. Return the array exactly as received
 
-**Step 1: Validate Contact Array**
-- Ensure contacts array is not empty
-- Check that each contact has minimum required fields:
-  - name (or first_name + last_name)
-  - title
-  - company
-  - linkedin_url (preferred) or email
+**What NOT to do:**
+- ❌ DO NOT add bio_summary, interesting_facts, linkedin_summary, web_summary
+- ❌ DO NOT research companies or people
+- ❌ DO NOT verify LinkedIn URLs
+- ❌ DO NOT add email addresses unless already present
+- ❌ DO NOT enrich any fields
 
-**Step 2: Prepare Enrichment Tasks**
-For each contact in the array:
-- Create a task payload containing:
-  - contact_data (the contact object)
-  - merged_claims (for context)
-  - contact_index (position in array)
-
-**Step 3: Launch Parallel Enrichment**
-- Call subscenario "09_ENRICH_CONTACT" for each contact
-- Pass individual task payload to each subscenario
-- Execute in parallel (all contacts enriched simultaneously)
-
-**Step 4: Collect Results**
-- Wait for all subscenarios to complete
-- Collect enriched contact objects
-- Preserve order (contact_index ensures correct sequencing)
-
-**Step 5: Return Enriched Contacts**
-- Return array of fully enriched contacts
-- Each contact now has: bio, interesting facts, signal relevance, research summaries
+The enrichment happens in the NEXT step (6_ENRICH_CONTACT_INDIVIDUAL) which uses web research and LinkedIn scraping agents.
 
 ### Output Format
 
+Return the contacts array EXACTLY as received, with only these additions:
+- contact_index (for ordering)
+- needs_verification: true (disclaimer)
+
 ```json
 {
-  "enriched_contacts": [
+  "contacts": [
     {
       "contact_id": "CONT_001",
-      "name": "[Contact Name]",
-      "title": "[Title from ICP]",
-      "company": "[Company Name]",
-      "linkedin_url": "[LinkedIn URL]",
-      "email": "[email address]",
-      "bio_summary": "[Bio summary text]",
-      "interesting_facts": ["[fact 1]", "[fact 2]"],
-      "linkedin_summary": "[LinkedIn research summary]",
-      "web_summary": "[Web research summary]",
-      "why_they_matter": "[Relevance description]",
-      "signal_relevance": "[How they relate to signal]",
-      "tier": "primary",
-      "confidence": "HIGH"
+      "contact_index": 0,
+      "name": "[Exact name from input]",
+      "first_name": "[If provided]",
+      "last_name": "[If provided]",
+      "title": "[Exact title from input]",
+      "company": "[Exact company from input]",
+      "linkedin_url": "[Exact URL from input, may be wrong]",
+      "email": "[Only if already provided]",
+      "tier": "[From input]",
+      "needs_verification": true
     }
   ],
-  "contacts_enriched_count": 7,
-  "failed_count": 0
+  "contact_count": 7,
+  "disclaimer": "Contacts are preliminary from Contact Discovery. LinkedIn URLs and details need verification via 6_ENRICH_CONTACT_INDIVIDUAL agent."
 }
 ```
 
 ### Constraints
 
-**Orchestration Logic:**
-- Launch all enrichment tasks in parallel (not sequential)
-- Handle failures gracefully (one failed contact shouldn't stop others)
-- Preserve contact order for reassembly
-- Pass sufficient context to each enrichment task
+**Pass-Through Rules:**
+- Copy ALL fields from input contacts exactly
+- Do NOT add new fields except contact_index and needs_verification
+- Do NOT modify existing field values
+- Do NOT remove or filter contacts
 
-**Error Handling:**
-- If a contact lacks LinkedIn URL, enrichment still attempts with web search
-- If enrichment fails for a contact, mark as "LOW" confidence but include
-- If ALL contacts fail, propagate error to parent pipeline
+**What Gets Added:**
+- contact_index: Position in array (0, 1, 2, ...)
+- needs_verification: true (always)
+- disclaimer: Message about preliminary data
+
+**What Does NOT Get Added:**
+- bio_summary (added by 6_ENRICH_CONTACT_INDIVIDUAL)
+- interesting_facts (added by 6_ENRICH_CONTACT_INDIVIDUAL)
+- linkedin_summary (added by 6_ENRICH_CONTACT_INDIVIDUAL)
+- web_summary (added by 6_ENRICH_CONTACT_INDIVIDUAL)
+- why_they_matter (added by 6_ENRICH_CONTACT_INDIVIDUAL)
+- signal_relevance (added by 6_ENRICH_CONTACT_INDIVIDUAL)
+- confidence level (added by 6_ENRICH_CONTACT_INDIVIDUAL)
 
 ---
 
 ## Variables Produced
 
-- `enriched_contacts` - Array of fully enriched contact objects
-- `contacts_enriched_count` - Number successfully enriched
-- `failed_count` - Number that failed enrichment
+- `contacts` - Array of preliminary contact objects (passed through as-is)
+- `contact_count` - Total number of contacts
+- `disclaimer` - Warning that contacts need verification
 
 ---
 
 ## Integration Notes
 
 **Make.com Setup:**
-- This is a "Call Subscenario" step, not an AI call
+- This IS an AI call (LLM formats the output)
+- Response includes contacts array for iteration
 - Use Iterator module to loop through contacts array
-- Each iteration calls "09_ENRICH_CONTACT" subscenario in parallel
-- Use Array Aggregator to reassemble results
+- Each iteration calls "09_ENRICH_CONTACT" (6_ENRICH_CONTACT_INDIVIDUAL) subscenario
+- The INDIVIDUAL enrichment step does the actual research/scraping
 
-**Parallel Execution:**
-- Make.com allows parallel subscenario calls via Iterator
-- All enrichments happen simultaneously (faster than sequential)
-- Order preserved via contact_index field
+**Flow:**
+```
+6_ENRICH_CONTACTS (this step)
+  → Returns preliminary contacts array
+  → Iterator loops through each contact
+    → For each: Call 6_ENRICH_CONTACT_INDIVIDUAL
+      → This step does web research, LinkedIn scraping, bio generation
+      → Returns fully enriched contact
+    → Transition to 10A_COPY (base copy)
+    → Transition to 10B_COPY_CLIENT_OVERRIDE (final copy)
+```
 
-**Next Steps:**
-- Enriched contacts flow to Copy generation (generic + client-specific)
-- Also included in Contacts section writer for dossier
+**Why Two Steps:**
+- 6_ENRICH_CONTACTS: Pass-through orchestrator (formats array for iteration)
+- 6_ENRICH_CONTACT_INDIVIDUAL: Does actual enrichment with agents
+
+**Data Quality:**
+- Input contacts may contain hallucinations from 4_CONTACT_DISCOVERY
+- LinkedIn URLs may be wrong or fabricated
+- Names may not match real people
+- 6_ENRICH_CONTACT_INDIVIDUAL will verify and correct via web research
