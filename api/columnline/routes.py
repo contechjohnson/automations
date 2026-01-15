@@ -615,7 +615,7 @@ async def prepare_steps(request: StepPrepareRequest):
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
 
         # All section writers need: dossier_plan + context_pack + merged_claims
-        if step_name in ["SECTION_WRITER_INTRO", "SECTION_WRITER_SIGNALS", "SECTION_WRITER_LEAD_INTELLIGENCE", "SECTION_WRITER_STRATEGY", "SECTION_WRITER_OPPORTUNITY", "SECTION_WRITER_CLIENT_SPECIFIC"]:
+        if step_name in ["10_WRITER_INTRO", "10_WRITER_SIGNALS", "10_WRITER_LEAD_INTELLIGENCE", "10_WRITER_STRATEGY", "10_WRITER_OPPORTUNITY", "10_WRITER_CLIENT_SPECIFIC"]:
             # Fetch dossier plan
             dossier_plan_output = repo.get_completed_step(request.run_id, "DOSSIER_PLAN")
             if dossier_plan_output:
@@ -671,12 +671,12 @@ async def prepare_steps(request: StepPrepareRequest):
             "CLAIMS_EXTRACTION": "gpt-4.1",
             "CONTEXT_PACK": "gpt-4.1",
             "DOSSIER_PLAN": "gpt-4.1",
-            "SECTION_WRITER_INTRO": "gpt-4.1",
-            "SECTION_WRITER_SIGNALS": "gpt-4.1",
-            "SECTION_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
-            "SECTION_WRITER_STRATEGY": "gpt-4.1",
-            "SECTION_WRITER_OPPORTUNITY": "gpt-4.1",
-            "SECTION_WRITER_CLIENT_SPECIFIC": "gpt-4.1"
+            "10_WRITER_INTRO": "gpt-4.1",
+            "10_WRITER_SIGNALS": "gpt-4.1",
+            "10_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
+            "10_WRITER_STRATEGY": "gpt-4.1",
+            "10_WRITER_OPPORTUNITY": "gpt-4.1",
+            "10_WRITER_CLIENT_SPECIFIC": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -1003,12 +1003,12 @@ async def transition_step(request: StepTransitionRequest):
         "CLAIMS_EXTRACTION": "gpt-4.1",
         "CONTEXT_PACK": "gpt-4.1",
         "DOSSIER_PLAN": "gpt-4.1",
-        "SECTION_WRITER_INTRO": "gpt-4.1",
-        "SECTION_WRITER_SIGNALS": "gpt-4.1",
-        "SECTION_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
-        "SECTION_WRITER_STRATEGY": "gpt-4.1",
-        "SECTION_WRITER_OPPORTUNITY": "gpt-4.1",
-        "SECTION_WRITER_CLIENT_SPECIFIC": "gpt-4.1"
+        "10_WRITER_INTRO": "gpt-4.1",
+        "10_WRITER_SIGNALS": "gpt-4.1",
+        "10_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
+        "10_WRITER_STRATEGY": "gpt-4.1",
+        "10_WRITER_OPPORTUNITY": "gpt-4.1",
+        "10_WRITER_CLIENT_SPECIFIC": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
