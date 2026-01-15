@@ -235,6 +235,7 @@ class StepOutputItem(BaseModel):
     """Single step output to store - pass full OpenAI response, we'll parse it"""
     step_name: str
     output: Any = Field(..., description="Full OpenAI response - we extract tokens/runtime automatically")
+    step_id: Optional[str] = None  # Optional - specify exact step to complete (useful for parallel steps with same name)
     tokens_used: Optional[int] = None  # Optional - will be extracted if not provided
     runtime_seconds: Optional[float] = None  # Optional - will be extracted if not provided
 

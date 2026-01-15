@@ -775,16 +775,25 @@ async def complete_steps(request: StepCompleteRequest):
 
     for output_item in request.outputs:
         # Find the pipeline step
-        step = repo.get_completed_step(request.run_id, output_item.step_name)
+        step = None
 
-        # If not found, try to find the "running" step
-        if not step:
-            result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', output_item.step_name).eq('status', 'running').execute()
+        # If step_id provided, find by ID directly (for parallel steps with same name)
+        if output_item.step_id:
+            result = repo.client.table('v2_pipeline_steps').select('*').eq('step_id', output_item.step_id).eq('run_id', request.run_id).execute()
             if result.data:
                 step = result.data[0]
+        else:
+            # Otherwise use step_name (existing logic)
+            step = repo.get_completed_step(request.run_id, output_item.step_name)
+
+            # If not found, try to find the "running" step
+            if not step:
+                result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', output_item.step_name).eq('status', 'running').execute()
+                if result.data:
+                    step = result.data[0]
 
         if not step:
-            raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_name}")
+            raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_id or output_item.step_name}")
 
         # AUTO-PARSE: If tokens/runtime not provided, extract from output
         tokens_used = output_item.tokens_used
