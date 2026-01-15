@@ -772,6 +772,7 @@ async def complete_steps(request: StepCompleteRequest):
     """
     # Find step_ids for these step names
     completed_steps = []
+    contacts_array = None
 
     for output_item in request.outputs:
         # Find the pipeline step
@@ -817,11 +818,24 @@ async def complete_steps(request: StepCompleteRequest):
 
         completed_steps.append(output_item.step_name)
 
+        # SPECIAL: If completing 6_ENRICH_CONTACTS, extract contacts array for Make.com iteration
+        if output_item.step_name == "6_ENRICH_CONTACTS":
+            clean_content = extract_clean_content(output_to_store)
+            if isinstance(clean_content, dict) and "contacts" in clean_content:
+                contacts_array = clean_content["contacts"]
+            elif isinstance(clean_content, list):
+                # If LLM returned array directly
+                contacts_array = clean_content
+            else:
+                # Fallback: empty array so Make.com doesn't break
+                contacts_array = []
+
     return StepCompleteResponse(
         success=True,
         run_id=request.run_id,
         steps_completed=completed_steps,
-        message=f"{len(completed_steps)} step(s) completed successfully"
+        message=f"{len(completed_steps)} step(s) completed successfully",
+        contacts=contacts_array
     )
 
 
