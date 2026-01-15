@@ -821,8 +821,14 @@ async def complete_steps(request: StepCompleteRequest):
         # SPECIAL: If completing 6_ENRICH_CONTACTS, extract contacts array for Make.com iteration
         if output_item.step_name == "6_ENRICH_CONTACTS":
             clean_content = extract_clean_content(output_to_store)
-            if isinstance(clean_content, dict) and "contacts" in clean_content:
-                contacts_array = clean_content["contacts"]
+            if isinstance(clean_content, dict):
+                # Check for both "enriched_contacts" and "contacts" field names
+                if "enriched_contacts" in clean_content:
+                    contacts_array = clean_content["enriched_contacts"]
+                elif "contacts" in clean_content:
+                    contacts_array = clean_content["contacts"]
+                else:
+                    contacts_array = []
             elif isinstance(clean_content, list):
                 # If LLM returned array directly
                 contacts_array = clean_content
