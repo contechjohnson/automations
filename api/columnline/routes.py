@@ -609,7 +609,7 @@ async def prepare_steps(request: StepPrepareRequest):
                     step_input["client_specific_claims"] = claims_output
 
         # Dossier Plan needs the context pack from 07B
-        if step_name == "DOSSIER_PLAN":
+        if step_name == "9_DOSSIER_PLAN":
             context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
@@ -617,7 +617,7 @@ async def prepare_steps(request: StepPrepareRequest):
         # All section writers need: dossier_plan + context_pack + merged_claims
         if step_name in ["10_WRITER_INTRO", "10_WRITER_SIGNALS", "10_WRITER_LEAD_INTELLIGENCE", "10_WRITER_STRATEGY", "10_WRITER_OPPORTUNITY", "10_WRITER_CLIENT_SPECIFIC"]:
             # Fetch dossier plan
-            dossier_plan_output = repo.get_completed_step(request.run_id, "DOSSIER_PLAN")
+            dossier_plan_output = repo.get_completed_step(request.run_id, "9_DOSSIER_PLAN")
             if dossier_plan_output:
                 step_input["dossier_plan"] = extract_clean_content(dossier_plan_output.get('output'))
 
@@ -670,7 +670,7 @@ async def prepare_steps(request: StepPrepareRequest):
             "MERGE_CLAIMS": "gpt-4.1",
             "CLAIMS_EXTRACTION": "gpt-4.1",
             "CONTEXT_PACK": "gpt-4.1",
-            "DOSSIER_PLAN": "gpt-4.1",
+            "9_DOSSIER_PLAN": "gpt-4.1",
             "10_WRITER_INTRO": "gpt-4.1",
             "10_WRITER_SIGNALS": "gpt-4.1",
             "10_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
@@ -1002,7 +1002,7 @@ async def transition_step(request: StepTransitionRequest):
         "MERGE_CLAIMS": "gpt-4.1",
         "CLAIMS_EXTRACTION": "gpt-4.1",
         "CONTEXT_PACK": "gpt-4.1",
-        "DOSSIER_PLAN": "gpt-4.1",
+        "9_DOSSIER_PLAN": "gpt-4.1",
         "10_WRITER_INTRO": "gpt-4.1",
         "10_WRITER_SIGNALS": "gpt-4.1",
         "10_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
