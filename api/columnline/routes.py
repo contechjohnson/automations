@@ -950,17 +950,29 @@ async def complete_steps(request: StepCompleteRequest):
 
         # SPECIAL: If completing 8_MEDIA, extract complete media output (as-is from GPT-5.2)
         if output_item.step_name == "8_MEDIA":
-            clean_content = extract_clean_content(output_to_store)
-            if isinstance(clean_content, dict):
-                # Store the entire media output with:
-                # - image_assets (array of images with metadata)
-                # - request_date, project_name, company, location
-                # - notes_for_span_sales_team
-                # - sources_used
-                media_data = clean_content
-            else:
-                # Fallback: empty dict so Make.com doesn't break
-                media_data = {}
+            try:
+                clean_content = extract_clean_content(output_to_store)
+                if isinstance(clean_content, dict):
+                    # Store the entire media output (GPT-5.2 returns in .result):
+                    # - as_of_date, entity
+                    # - recommended_project_images (array)
+                    # - optional_additional_visual_sources_to_check_next (array)
+                    # - notes_for_sales_dossier_use
+                    media_data = clean_content
+                elif isinstance(clean_content, str):
+                    # Sometimes LLM returns JSON as string - try to parse it
+                    import json
+                    try:
+                        media_data = json.loads(clean_content)
+                    except:
+                        media_data = {"raw_text": clean_content}
+                else:
+                    # Fallback: wrap whatever we got
+                    media_data = {"raw_content": str(clean_content)}
+            except Exception as e:
+                # Log error but don't fail the request
+                print(f"Warning: Error extracting 8_MEDIA content: {e}")
+                media_data = {"error": str(e), "raw_output_type": str(type(output_to_store))}
 
     return StepCompleteResponse(
         success=True,
