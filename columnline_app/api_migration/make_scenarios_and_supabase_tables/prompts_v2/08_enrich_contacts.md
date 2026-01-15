@@ -4,7 +4,7 @@
 **Step:** 6_ENRICH_CONTACTS
 **Produces Claims:** FALSE
 **Context Pack:** FALSE
-**Model:** N/A (Orchestration)
+**Model:** gpt-4.1
 
 ---
 
@@ -39,10 +39,16 @@ Claims from Insight (07B) step
 ## Main Prompt Template
 
 ### Role
-You are a claims extraction specialist focused on identifying key contacts from research claims.
+You are a contact extraction specialist. Your ONLY job is to extract PEOPLE (not companies) from research claims.
 
 ### Objective
-Extract all contacts mentioned in ALL individual claims (not merged) and structure them as an array for individual enrichment. Look through ALL claims from every research step for any mentions of people, titles, companies, and LinkedIn URLs.
+Extract all **INDIVIDUAL PEOPLE** mentioned in the claims and return them in a simple contacts array.
+
+**CRITICAL: You are extracting PEOPLE only - human beings with names like "John Smith" or "Sarah Johnson". Do NOT include:**
+- Companies (JHET Architects, DataBank Holdings, etc.)
+- Organizations
+- Firms or consultancies
+- Any entity that is not an individual person
 
 ### What You Receive
 - **All individual claims** from each research step (Signal, Entity, Contact Discovery, Enrich Lead, Enrich Opportunity, Client Specific, Insight)
@@ -117,82 +123,64 @@ You are extracting what's already in the claims. The next step (6_ENRICH_CONTACT
 
 ### Output Format
 
-Return an array of contact objects extracted from claims:
+**IMPORTANT: Return EXACTLY this JSON structure. Do not wrap in "result" or any other container.**
 
 ```json
 {
   "contacts": [
     {
-      "contact_id": "CONT_001",
       "contact_index": 0,
-      "name": "[Full name from claims]",
-      "first_name": "[Parsed first name]",
-      "last_name": "[Parsed last name]",
-      "title": "[Title from claims]",
-      "company": "[Company from claims]",
-      "linkedin_url": "[From claims if mentioned, else null]",
-      "linkedin_url_verified": false,
-      "email": "[From claims if mentioned, else null]",
-      "email_verified": false,
-      "tier": "primary",
-      "why_they_matter": "[From claims: decision authority, project role, etc.]",
-      "signal_relevance": "[From claims: how they relate to signal/project]",
-      "preliminary_bio": "[If 4_CONTACT_DISCOVERY found bio info, include it here]",
-      "project_involvement": "[Specific projects they're leading from claims]",
-      "decision_authority": "[Budget approval, vendor selection authority from claims]",
-      "background_notes": "[Education, previous companies, expertise from claims]",
-      "timing_notes": "[When hired, if hired for this project specifically]",
+      "name": "Tony Qorri",
+      "title": "Owner Contact",
+      "company": "DataBank Holdings Ltd.",
+      "role_in_project": "Owner Contact for DFW12 project",
+      "why_they_matter": "Listed on TDLR filing, likely routes procurement inquiries",
       "source": "claims",
-      "needs_verification": true
+      "source_url": "https://example.com/source",
+      "confidence": "HIGH",
+      "notes": "Any additional context from claims"
+    },
+    {
+      "contact_index": 1,
+      "name": "Raul K. Martynek",
+      "title": "Chief Executive Officer",
+      "company": "DataBank Holdings Ltd.",
+      "role_in_project": "C-suite executive",
+      "why_they_matter": "Top decision maker",
+      "source": "claims",
+      "source_url": "https://databank.com/leadership",
+      "confidence": "HIGH",
+      "notes": "May not be directly reachable for construction"
     }
   ],
-  "contact_count": 7,
-  "disclaimer": "Contacts extracted from research claims with ALL available context. LinkedIn URLs, emails, and biographical details need verification via 6_ENRICH_CONTACT_INDIVIDUAL agent."
+  "contact_count": 2
 }
 ```
 
 ### Constraints
 
+**PEOPLE ONLY - This is Critical:**
+- ✅ Extract: "Tony Qorri", "Raul K. Martynek", "Sarah Johnson"
+- ❌ DO NOT extract: "JHET Architects", "DataBank Holdings", "RAS Consultant"
+- A contact MUST be an individual human being with a first and last name
+- Companies, firms, and organizations are NOT contacts
+
 **Claims Extraction Rules:**
-- ONLY extract contacts mentioned in merged_claims
+- ONLY extract people mentioned in the claims
 - Do NOT hallucinate contacts not in claims
-- If a field isn't in claims, leave it null or omit it
+- Do NOT include companies or organizations as contacts
 - Preserve exact names/titles from claims
 
-**What Gets Extracted from Claims (ALL of this if present):**
-- name, first_name, last_name
-- title, company
-- linkedin_url (if mentioned - mark as unverified)
-- email (if mentioned - mark as unverified)
-- why_they_matter (their role, authority)
-- signal_relevance (connection to project/signal)
-- tier (primary/secondary based on authority)
-- preliminary_bio (any bio info from 4_CONTACT_DISCOVERY)
-- project_involvement (specific projects they're leading)
-- decision_authority (budget, vendor selection, team leadership)
-- background_notes (education, previous companies, expertise)
-- timing_notes (when hired, if hired for specific project)
+**Output Structure Rules:**
+- Return `{"contacts": [...], "contact_count": N}` at the ROOT level
+- Do NOT wrap in "result" or any other container
+- Each contact needs: name, title, company, why_they_matter
 
-**What Gets Added by YOU:**
-- contact_id: Generate as CONT_001, CONT_002, etc.
-- contact_index: Position in array (0, 1, 2, ...)
-- source: "claims" (to indicate origin)
-- needs_verification: true (always)
-
-**What Does NOT Get Added Here:**
-- bio_summary (added by 6_ENRICH_CONTACT_INDIVIDUAL)
-- interesting_facts (added by 6_ENRICH_CONTACT_INDIVIDUAL)
-- linkedin_summary (added by 6_ENRICH_CONTACT_INDIVIDUAL)
-- web_summary (added by 6_ENRICH_CONTACT_INDIVIDUAL)
-- confidence level (added by 6_ENRICH_CONTACT_INDIVIDUAL after verification)
-
-**If No Contacts Found in Claims:**
-Return empty array with message:
+**If No People Found in Claims:**
 ```json
 {
   "contacts": [],
-  "contact_count": 0,
-  "message": "No contacts found in claims. May need to review 4_CONTACT_DISCOVERY output."
+  "contact_count": 0
 }
 ```
 

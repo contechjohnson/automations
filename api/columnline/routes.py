@@ -932,21 +932,45 @@ async def complete_steps(request: StepCompleteRequest):
         # SPECIAL: If completing 6_ENRICH_CONTACTS, extract contacts array for Make.com iteration
         if output_item.step_name == "6_ENRICH_CONTACTS":
             clean_content = extract_clean_content(output_to_store)
+            contacts_array = []
+
             if isinstance(clean_content, dict):
-                # Check for both "contacts" (new format) and "enriched_contacts" (old format)
+                # Try multiple possible locations for contacts array
                 if "contacts" in clean_content:
                     contacts_array = clean_content["contacts"]
                 elif "enriched_contacts" in clean_content:
-                    # Backward compatibility with old prompt format
                     contacts_array = clean_content["enriched_contacts"]
-                else:
-                    contacts_array = []
+                elif "key_contacts" in clean_content:
+                    contacts_array = clean_content["key_contacts"]
+                # Handle nested structure: {result: {key_contacts: [...]}}
+                elif "result" in clean_content and isinstance(clean_content["result"], dict):
+                    result = clean_content["result"]
+                    if "contacts" in result:
+                        contacts_array = result["contacts"]
+                    elif "key_contacts" in result:
+                        contacts_array = result["key_contacts"]
+                    elif "enriched_contacts" in result:
+                        contacts_array = result["enriched_contacts"]
             elif isinstance(clean_content, list):
-                # If LLM returned array directly
                 contacts_array = clean_content
-            else:
-                # Fallback: empty array so Make.com doesn't break
-                contacts_array = []
+
+            # Filter out companies - only keep entries that are actual people
+            # A person has a "name" that looks like a person name (not a company name)
+            filtered_contacts = []
+            for contact in contacts_array:
+                if isinstance(contact, dict):
+                    name = contact.get("name", "")
+                    # Skip if name looks like a company (contains Inc, LLC, Ltd, Corp, Architects, etc.)
+                    company_indicators = ["Inc", "LLC", "Ltd", "Corp", "Company", "Architects", "Partners", "Group", "Associates", "Engineering", "Consulting"]
+                    is_company = any(indicator.lower() in name.lower() for indicator in company_indicators)
+                    # Also skip if there's no personal name indicators (no spaces or very short)
+                    looks_like_person = " " in name and len(name.split()) >= 2
+
+                    if looks_like_person and not is_company:
+                        filtered_contacts.append(contact)
+
+            contacts_array = filtered_contacts
+            print(f"6_ENRICH_CONTACTS: Extracted {len(contacts_array)} people contacts (filtered out companies)")
 
         # SPECIAL: If completing 8_MEDIA, extract complete media output (as-is from GPT-5.2)
         if output_item.step_name == "8_MEDIA":
