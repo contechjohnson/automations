@@ -614,6 +614,23 @@ async def prepare_steps(request: StepPrepareRequest):
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
 
+        # All section writers need: dossier_plan + context_pack + merged_claims
+        if step_name in ["INTRO_WRITER", "SIGNALS_WRITER", "LEAD_INTELLIGENCE_WRITER", "STRATEGY_WRITER", "OPPORTUNITY_WRITER", "CLIENT_SPECIFIC_WRITER"]:
+            # Fetch dossier plan
+            dossier_plan_output = repo.get_completed_step(request.run_id, "DOSSIER_PLAN")
+            if dossier_plan_output:
+                step_input["dossier_plan"] = extract_clean_content(dossier_plan_output.get('output'))
+
+            # Fetch context pack
+            context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
+            if context_pack_output:
+                step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
+
+            # Fetch merged claims
+            merged_claims_output = repo.get_completed_step(request.run_id, "MERGE_CLAIMS")
+            if merged_claims_output:
+                step_input["merged_claims"] = extract_clean_content(merged_claims_output.get('output'))
+
         # Merge Claims needs ALL claims including insight claims
         if step_name == "MERGE_CLAIMS":
             # Find all completed claims extraction steps
@@ -653,7 +670,13 @@ async def prepare_steps(request: StepPrepareRequest):
             "MERGE_CLAIMS": "gpt-4.1",
             "CLAIMS_EXTRACTION": "gpt-4.1",
             "CONTEXT_PACK": "gpt-4.1",
-            "DOSSIER_PLAN": "gpt-4.1"
+            "DOSSIER_PLAN": "gpt-4.1",
+            "INTRO_WRITER": "gpt-4.1",
+            "SIGNALS_WRITER": "gpt-4.1",
+            "LEAD_INTELLIGENCE_WRITER": "gpt-4.1",
+            "STRATEGY_WRITER": "gpt-4.1",
+            "OPPORTUNITY_WRITER": "gpt-4.1",
+            "CLIENT_SPECIFIC_WRITER": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -979,7 +1002,13 @@ async def transition_step(request: StepTransitionRequest):
         "MERGE_CLAIMS": "gpt-4.1",
         "CLAIMS_EXTRACTION": "gpt-4.1",
         "CONTEXT_PACK": "gpt-4.1",
-        "DOSSIER_PLAN": "gpt-4.1"
+        "DOSSIER_PLAN": "gpt-4.1",
+        "INTRO_WRITER": "gpt-4.1",
+        "SIGNALS_WRITER": "gpt-4.1",
+        "LEAD_INTELLIGENCE_WRITER": "gpt-4.1",
+        "STRATEGY_WRITER": "gpt-4.1",
+        "OPPORTUNITY_WRITER": "gpt-4.1",
+        "CLIENT_SPECIFIC_WRITER": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
