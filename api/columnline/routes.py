@@ -614,6 +614,26 @@ async def prepare_steps(request: StepPrepareRequest):
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
 
+        # Enrich Contacts needs context pack from 7B
+        if step_name == "6_ENRICH_CONTACTS":
+            context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
+            if context_pack_output:
+                step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
+
+            # Also needs merged claims
+            merged_claims_output = repo.get_completed_step(request.run_id, "MERGE_CLAIMS")
+            if merged_claims_output:
+                step_input["merged_claims"] = extract_clean_content(merged_claims_output.get('output'))
+
+        # Individual contact enrichment needs merged claims (contact_data passed by Make.com)
+        if step_name == "6_ENRICH_CONTACT_INDIVIDUAL":
+            merged_claims_output = repo.get_completed_step(request.run_id, "MERGE_CLAIMS")
+            if merged_claims_output:
+                step_input["merged_claims"] = extract_clean_content(merged_claims_output.get('output'))
+
+        # Copy needs enriched contact data (will be passed via transition or Make.com)
+        # 10A_COPY and 10B_COPY_CLIENT_OVERRIDE auto-fetch handled in transition logic
+
         # All section writers need: dossier_plan + context_pack + merged_claims
         if step_name in ["10_WRITER_INTRO", "10_WRITER_SIGNALS", "10_WRITER_LEAD_INTELLIGENCE", "10_WRITER_STRATEGY", "10_WRITER_OPPORTUNITY", "10_WRITER_CLIENT_SPECIFIC"]:
             # Fetch dossier plan
@@ -676,7 +696,11 @@ async def prepare_steps(request: StepPrepareRequest):
             "10_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
             "10_WRITER_STRATEGY": "gpt-4.1",
             "10_WRITER_OPPORTUNITY": "gpt-4.1",
-            "10_WRITER_CLIENT_SPECIFIC": "gpt-4.1"
+            "10_WRITER_CLIENT_SPECIFIC": "gpt-4.1",
+            "6_ENRICH_CONTACTS": "gpt-4.1",
+            "6_ENRICH_CONTACT_INDIVIDUAL": "gpt-4.1",
+            "10A_COPY": "gpt-4.1",
+            "10B_COPY_CLIENT_OVERRIDE": "gpt-4.1"
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -989,6 +1013,17 @@ async def transition_step(request: StepTransitionRequest):
             elif '5c_client_specific_output' in step_input_data:
                 step_input["client_specific_claims"] = claims_output
 
+    # Contact enrichment flow transitions
+    if request.next_step_name == "10A_COPY":
+        # Copy needs enriched contact data (just completed)
+        if request.completed_step_name == "6_ENRICH_CONTACT_INDIVIDUAL":
+            step_input["enriched_contact_data"] = clean_output
+
+    if request.next_step_name == "10B_COPY_CLIENT_OVERRIDE":
+        # Client override copy needs the base copy (just completed)
+        if request.completed_step_name == "10A_COPY":
+            step_input["base_copy"] = clean_output
+
     # Get model
     model_map = {
         "1_SEARCH_BUILDER": "o4-mini",
@@ -1008,7 +1043,11 @@ async def transition_step(request: StepTransitionRequest):
         "10_WRITER_LEAD_INTELLIGENCE": "gpt-4.1",
         "10_WRITER_STRATEGY": "gpt-4.1",
         "10_WRITER_OPPORTUNITY": "gpt-4.1",
-        "10_WRITER_CLIENT_SPECIFIC": "gpt-4.1"
+        "10_WRITER_CLIENT_SPECIFIC": "gpt-4.1",
+        "6_ENRICH_CONTACTS": "gpt-4.1",
+        "6_ENRICH_CONTACT_INDIVIDUAL": "gpt-4.1",
+        "10A_COPY": "gpt-4.1",
+        "10B_COPY_CLIENT_OVERRIDE": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
