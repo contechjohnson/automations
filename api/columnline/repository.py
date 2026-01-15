@@ -257,3 +257,109 @@ class ColumnlineRepository:
         """Get all contacts for a dossier"""
         result = self.client.table('v2_contacts').select('*').eq('dossier_id', dossier_id).execute()
         return result.data
+
+    # ========================================================================
+    # BATCH COMPOSER
+    # ========================================================================
+
+    def create_batch(self, batch_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new batch record"""
+        result = self.client.table('v2_batch_composer').insert(batch_data).execute()
+        return result.data[0]
+
+    def update_batch(self, batch_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update batch record"""
+        result = self.client.table('v2_batch_composer').update(updates).eq('batch_id', batch_id).execute()
+        return result.data[0]
+
+    def get_batch(self, batch_id: str) -> Optional[Dict[str, Any]]:
+        """Get batch by ID"""
+        result = self.client.table('v2_batch_composer').select('*').eq('batch_id', batch_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+
+    def get_client_thread(self, client_id: str) -> Optional[str]:
+        """Get or determine the current thread_id for a client's batches"""
+        # Get most recent batch for client to determine thread
+        result = self.client.table('v2_batch_composer').select('thread_id, batch_number').eq('client_id', client_id).order('created_at', desc=True).limit(1).execute()
+
+        if result.data and result.data[0].get('thread_id'):
+            return result.data[0]['thread_id']
+        return None
+
+    def get_recent_batches(self, client_id: str, thread_id: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """Get recent batches in a thread for memory context"""
+        result = self.client.table('v2_batch_composer').select('batch_id, directions, distribution_achieved, created_at').eq('client_id', client_id).eq('thread_id', thread_id).eq('status', 'completed').order('batch_number', desc=True).limit(limit).execute()
+        return result.data
+
+    def get_existing_leads(self, client_id: str, limit: int = 30) -> List[Dict[str, Any]]:
+        """Get recent leads/dossiers for a client to avoid duplicates"""
+        result = self.client.table('v2_dossiers').select('target_entity, target_project, lead_score, created_at').eq('client_id', client_id).order('created_at', desc=True).limit(limit).execute()
+        return result.data
+
+    def get_next_batch_number(self, client_id: str, thread_id: str) -> int:
+        """Get the next batch number for a thread"""
+        result = self.client.table('v2_batch_composer').select('batch_number').eq('client_id', client_id).eq('thread_id', thread_id).order('batch_number', desc=True).limit(1).execute()
+
+        if result.data and result.data[0].get('batch_number'):
+            return result.data[0]['batch_number'] + 1
+        return 1
+
+    # ========================================================================
+    # PREP INPUTS (COMPRESSION)
+    # ========================================================================
+
+    def create_prep(self, prep_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new prep inputs record"""
+        result = self.client.table('v2_prep_inputs').insert(prep_data).execute()
+        return result.data[0]
+
+    def update_prep(self, prep_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update prep inputs record"""
+        result = self.client.table('v2_prep_inputs').update(updates).eq('prep_id', prep_id).execute()
+        return result.data[0]
+
+    def get_prep(self, prep_id: str) -> Optional[Dict[str, Any]]:
+        """Get prep record by ID"""
+        result = self.client.table('v2_prep_inputs').select('*').eq('prep_id', prep_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+
+    def update_client_compressed(self, client_id: str, field: str, value: Any) -> Dict[str, Any]:
+        """Update a compressed field on v2_clients"""
+        result = self.client.table('v2_clients').update({field: value, 'updated_at': datetime.now().isoformat()}).eq('client_id', client_id).execute()
+        return result.data[0]
+
+    # ========================================================================
+    # CLIENT ONBOARDING
+    # ========================================================================
+
+    def create_onboarding(self, onboarding_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new onboarding record"""
+        result = self.client.table('v2_onboarding').insert(onboarding_data).execute()
+        return result.data[0]
+
+    def update_onboarding(self, onboarding_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update onboarding record"""
+        result = self.client.table('v2_onboarding').update(updates).eq('onboarding_id', onboarding_id).execute()
+        return result.data[0]
+
+    def get_onboarding(self, onboarding_id: str) -> Optional[Dict[str, Any]]:
+        """Get onboarding record by ID"""
+        result = self.client.table('v2_onboarding').select('*').eq('onboarding_id', onboarding_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+
+    def create_client(self, client_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new client record"""
+        result = self.client.table('v2_clients').insert(client_data).execute()
+        return result.data[0]
+
+    def update_client(self, client_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update client record"""
+        updates['updated_at'] = datetime.now().isoformat()
+        result = self.client.table('v2_clients').update(updates).eq('client_id', client_id).execute()
+        return result.data[0]

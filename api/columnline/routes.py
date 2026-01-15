@@ -20,7 +20,19 @@ from .models import (
     SuccessResponse,
     StepPrepareRequest, StepPrepareResponse, PreparedStep,
     StepCompleteRequest, StepCompleteResponse, StepOutputItem,
-    StepTransitionRequest, StepTransitionResponse
+    StepTransitionRequest, StepTransitionResponse,
+    # Batch Composer
+    BatchStartRequest, BatchStartResponse,
+    BatchPrepareRequest, BatchPrepareResponse,
+    BatchCompleteRequest, BatchCompleteResponse, BatchDirection,
+    # Prep Inputs
+    PrepStartRequest, PrepStartResponse,
+    PrepPrepareRequest, PrepPrepareResponse,
+    PrepCompleteRequest, PrepCompleteResponse,
+    # Onboarding
+    OnboardStartRequest, OnboardStartResponse,
+    OnboardPrepareRequest, OnboardPrepareResponse,
+    OnboardCompleteRequest, OnboardCompleteResponse
 )
 
 router = APIRouter(prefix="/columnline", tags=["columnline"])
@@ -1440,3 +1452,242 @@ async def health_check():
         "service": "columnline-api",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+# ============================================================================
+# BATCH COMPOSER ENDPOINTS
+# ============================================================================
+
+@router.post("/batches/start", response_model=BatchStartResponse)
+async def start_batch(request: BatchStartRequest):
+    """
+    Start a new batch for generating seed directions.
+
+    Creates a batch record and assigns it to a thread for memory continuity.
+
+    Make.com usage:
+        HTTP POST /columnline/batches/start
+        Body: {"client_id": "CLT_EXAMPLE_001", "batch_size": 10}
+
+        Response: {
+            "batch_id": "BATCH_20260115_001",
+            "thread_id": "THREAD_CLT_EXAMPLE_001_v1",
+            "batch_number": 5
+        }
+    """
+    # Validate client exists
+    client = repo.get_client(request.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+
+    # Get or create thread_id
+    thread_id = repo.get_client_thread(request.client_id)
+    if not thread_id:
+        thread_id = f"THREAD_{request.client_id}_v1"
+
+    # Get next batch number
+    batch_number = repo.get_next_batch_number(request.client_id, thread_id)
+
+    # Generate batch_id
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    batch_id = f"BATCH_{timestamp}_{batch_number:03d}"
+
+    # Create batch record
+    batch_data = {
+        "batch_id": batch_id,
+        "client_id": request.client_id,
+        "status": "pending",
+        "thread_id": thread_id,
+        "batch_number": batch_number,
+        "batch_strategy": client.get('batch_strategy'),
+        "started_at": datetime.now().isoformat()
+    }
+
+    repo.create_batch(batch_data)
+
+    return BatchStartResponse(
+        success=True,
+        batch_id=batch_id,
+        client_id=request.client_id,
+        thread_id=thread_id,
+        batch_number=batch_number,
+        message="Batch created successfully"
+    )
+
+
+@router.post("/batches/prepare", response_model=BatchPrepareResponse)
+async def prepare_batch(request: BatchPrepareRequest):
+    """
+    Prepare inputs for batch composer LLM call.
+
+    Fetches compressed configs, recent batches (thread memory), and existing leads.
+
+    Make.com usage:
+        HTTP POST /columnline/batches/prepare
+        Body: {"batch_id": "BATCH_20260115_001"}
+
+        Response: {
+            "batch_id": "...",
+            "prompt_id": "16_batch_composer",
+            "prompt_template": "...",
+            "model_used": "gpt-4.1",
+            "input": {
+                "icp_config_compressed": {...},
+                "industry_research_compressed": {...},
+                "research_context_compressed": {...},
+                "batch_strategy_compressed": {...},
+                "recent_directions": [...],
+                "existing_leads": [...],
+                "batch_size": 10
+            }
+        }
+
+        Then Make.com runs the LLM with prompt_template + input
+    """
+    # Get batch record
+    batch = repo.get_batch(request.batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail=f"Batch not found: {request.batch_id}")
+
+    # Get client
+    client = repo.get_client(batch['client_id'])
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {batch['client_id']}")
+
+    # Get batch composer prompt (prompt 16)
+    prompt = repo.get_prompt_by_step("16_BATCH_COMPOSER")
+    if not prompt:
+        # Try by slug
+        prompt = repo.get_prompt_by_slug("batch-composer")
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Batch composer prompt not found (step: 16_BATCH_COMPOSER)")
+
+    # Get thread memory - recent batches in this thread
+    recent_batches = repo.get_recent_batches(batch['client_id'], batch['thread_id'], limit=3)
+    recent_directions = []
+    for rb in recent_batches:
+        if rb.get('directions'):
+            recent_directions.extend(rb['directions'])
+
+    # Get existing leads to avoid duplicates
+    existing_leads = repo.get_existing_leads(batch['client_id'], limit=30)
+
+    # Get batch size from strategy or use default
+    batch_strategy = client.get('batch_strategy', {})
+    batch_size = batch_strategy.get('seed_generation_rules', {}).get('count_per_batch', {}).get('max', 10)
+
+    # Build input
+    batch_input = {
+        "current_date": datetime.now().strftime("%Y-%m-%d"),
+        "icp_config_compressed": client.get('icp_config_compressed'),
+        "industry_research_compressed": client.get('industry_research_compressed'),
+        "research_context_compressed": client.get('research_context_compressed'),
+        "batch_strategy_compressed": client.get('batch_strategy_compressed'),
+        "recent_directions": recent_directions,
+        "existing_leads": existing_leads,
+        "batch_size": batch_size,
+        "batch_number": batch['batch_number'],
+        "thread_id": batch['thread_id']
+    }
+
+    # Store snapshots for debugging
+    repo.update_batch(request.batch_id, {
+        "existing_leads_snapshot": existing_leads,
+        "recent_directions_snapshot": recent_directions
+    })
+
+    return BatchPrepareResponse(
+        batch_id=request.batch_id,
+        prompt_id=prompt['prompt_id'],
+        prompt_template=prompt['prompt_template'],
+        model_used="gpt-4.1",
+        input=batch_input
+    )
+
+
+@router.post("/batches/complete", response_model=BatchCompleteResponse)
+async def complete_batch(request: BatchCompleteRequest):
+    """
+    Complete batch with LLM output containing directions.
+
+    Stores directions and returns them for Make.com to iterate and trigger pipelines.
+
+    Make.com usage:
+        HTTP POST /columnline/batches/complete
+        Body: {
+            "batch_id": "BATCH_20260115_001",
+            "output": {{entire_openai_response}}
+        }
+
+        Response: {
+            "success": true,
+            "batch_id": "...",
+            "directions": [
+                {"project_type": "data_center", "geography": "Virginia", "signal_type": "epcm_award", "hint": "Hyperscale"},
+                ...
+            ],
+            "directions_count": 10,
+            "distribution_achieved": {"data_center": 7, "mining": 1, ...}
+        }
+
+        Make.com then iterates over directions array to trigger pipelines
+    """
+    # Get batch record
+    batch = repo.get_batch(request.batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail=f"Batch not found: {request.batch_id}")
+
+    # Parse LLM output
+    parsed = parse_openai_response(request.output)
+    clean_output = extract_clean_content(request.output)
+
+    # Extract directions from output
+    directions = []
+    distribution_achieved = None
+
+    if isinstance(clean_output, dict):
+        # Look for directions in various locations
+        if 'directions' in clean_output:
+            directions = clean_output['directions']
+        elif 'seeds' in clean_output:
+            directions = clean_output['seeds']
+        elif 'result' in clean_output and isinstance(clean_output['result'], dict):
+            result = clean_output['result']
+            if 'directions' in result:
+                directions = result['directions']
+            elif 'seeds' in result:
+                directions = result['seeds']
+
+        # Extract distribution achieved
+        if 'distribution_achieved' in clean_output:
+            distribution_achieved = clean_output['distribution_achieved']
+        elif 'result' in clean_output and isinstance(clean_output['result'], dict):
+            distribution_achieved = clean_output['result'].get('distribution_achieved')
+
+    # Convert to BatchDirection objects
+    direction_objects = []
+    for d in directions:
+        if isinstance(d, dict):
+            direction_objects.append(BatchDirection(
+                project_type=d.get('project_type', 'unknown'),
+                geography=d.get('geography', 'unknown'),
+                signal_type=d.get('signal_type'),
+                hint=d.get('hint', '')
+            ))
+
+    # Update batch record
+    repo.update_batch(request.batch_id, {
+        "status": "completed",
+        "directions": [d.model_dump() for d in direction_objects],
+        "distribution_achieved": distribution_achieved,
+        "completed_at": datetime.now().isoformat()
+    })
+
+    return BatchCompleteResponse(
+        success=True,
+        batch_id=request.batch_id,
+        directions=direction_objects,
+        directions_count=len(direction_objects),
+        distribution_achieved=distribution_achieved,
+        message=f"Batch completed with {len(direction_objects)} directions"
+    )

@@ -282,3 +282,190 @@ class StepTransitionResponse(BaseModel):
 
     # What's prepared for next
     next_step: PreparedStep
+
+
+# ============================================================================
+# BATCH COMPOSER MODELS
+# ============================================================================
+
+class BatchStartRequest(BaseModel):
+    """Start a new batch for seed direction generation"""
+    client_id: str
+    batch_size: Optional[int] = Field(default=None, description="Number of directions to generate (defaults to batch_strategy setting)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "client_id": "CLT_EXAMPLE_001",
+                "batch_size": 10
+            }
+        }
+
+
+class BatchStartResponse(BaseModel):
+    """Response from starting a batch"""
+    success: bool = True
+    batch_id: str
+    client_id: str
+    thread_id: str
+    batch_number: int
+    message: str = "Batch created successfully"
+
+
+class BatchPrepareRequest(BaseModel):
+    """Prepare inputs for batch composer LLM call"""
+    batch_id: str
+
+
+class BatchPrepareResponse(BaseModel):
+    """Prepared batch with prompt and inputs ready for LLM"""
+    batch_id: str
+    prompt_id: str
+    prompt_template: str
+    model_used: str = "gpt-4.1"
+    input: Dict[str, Any]  # Contains compressed configs + recent_directions + existing_leads
+
+
+class BatchCompleteRequest(BaseModel):
+    """Complete batch with LLM output"""
+    batch_id: str
+    output: Any = Field(..., description="Full OpenAI response with directions")
+
+
+class BatchDirection(BaseModel):
+    """Single direction/hint for pipeline"""
+    project_type: str
+    geography: str
+    signal_type: Optional[str] = None
+    hint: str
+
+
+class BatchCompleteResponse(BaseModel):
+    """Response after storing batch output"""
+    success: bool = True
+    batch_id: str
+    directions: List[BatchDirection]
+    directions_count: int
+    distribution_achieved: Optional[Dict[str, int]] = None
+    message: str = "Batch completed successfully"
+
+
+# ============================================================================
+# PREP INPUTS (COMPRESSION) MODELS
+# ============================================================================
+
+class PrepStartRequest(BaseModel):
+    """Start config compression for a client"""
+    client_id: str
+
+
+class PrepStartResponse(BaseModel):
+    """Response from starting prep inputs"""
+    success: bool = True
+    prep_id: str
+    client_id: str
+    steps: List[str]
+    first_step: str
+    message: str = "Prep started successfully"
+
+
+class PrepPrepareRequest(BaseModel):
+    """Prepare a compression step"""
+    prep_id: str
+    step_name: str = Field(..., description="compress_icp, compress_industry, compress_research_context, or compress_batch_strategy")
+
+
+class PrepPrepareResponse(BaseModel):
+    """Prepared compression step with prompt and input"""
+    prep_id: str
+    step_name: str
+    prompt_id: str
+    prompt_template: str
+    model_used: str = "gpt-4.1"
+    input: Dict[str, Any]  # Contains full config to compress
+
+
+class PrepCompleteRequest(BaseModel):
+    """Complete a compression step"""
+    prep_id: str
+    step_name: str
+    output: Any = Field(..., description="Full OpenAI response with compressed config")
+
+
+class PrepCompleteResponse(BaseModel):
+    """Response after storing compressed config"""
+    success: bool = True
+    prep_id: str
+    step_name: str
+    next_step: Optional[str] = None  # None if done
+    tokens_saved: Optional[int] = None
+    message: str = "Step completed successfully"
+
+
+# ============================================================================
+# CLIENT ONBOARDING MODELS
+# ============================================================================
+
+class OnboardStartRequest(BaseModel):
+    """Start client onboarding"""
+    client_name: str
+    intake_data: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Raw intake data: transcripts, website, narrative, pre_research, materials (all optional)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "client_name": "Acme Construction",
+                "intake_data": {
+                    "transcripts": "Sales call transcript...",
+                    "website": "acme-construction.com",
+                    "narrative": "Acme is a commercial construction firm...",
+                    "materials": "PDF content or notes..."
+                }
+            }
+        }
+
+
+class OnboardStartResponse(BaseModel):
+    """Response from starting onboarding"""
+    success: bool = True
+    onboarding_id: str
+    client_id: str
+    steps: List[str]
+    first_step: str
+    message: str = "Onboarding started successfully"
+
+
+class OnboardPrepareRequest(BaseModel):
+    """Prepare an onboarding step"""
+    onboarding_id: str
+    step_name: str = Field(..., description="consolidate_intake or generate_configs")
+
+
+class OnboardPrepareResponse(BaseModel):
+    """Prepared onboarding step with prompt and input"""
+    onboarding_id: str
+    step_name: str
+    prompt_id: str
+    prompt_template: str
+    model_used: str = "gpt-4.1"
+    input: Dict[str, Any]
+
+
+class OnboardCompleteRequest(BaseModel):
+    """Complete an onboarding step"""
+    onboarding_id: str
+    step_name: str
+    output: Any = Field(..., description="Full OpenAI response")
+
+
+class OnboardCompleteResponse(BaseModel):
+    """Response after completing onboarding step"""
+    success: bool = True
+    onboarding_id: str
+    step_name: str
+    next_step: Optional[str] = None  # None if done
+    configs_generated: Optional[List[str]] = None  # Set on final step
+    message: str = "Step completed successfully"
