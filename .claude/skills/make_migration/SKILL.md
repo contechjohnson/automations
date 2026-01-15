@@ -1,131 +1,147 @@
 ---
-name: make_migration_to_api
-description: Build, edit, and understand automation, API, and functions, scripts related to the columnline_app, and make.com. So, anything related to column line app or make.com go here.
+name: make_migration
+description: Build, edit, and understand the v2 Make.com pipeline, API routes, and Supabase tables for the Columnline dossier system.
+---
+
+## Current State (Jan 2026)
+
+The v2 Make.com → Supabase pipeline is **operational**. Key components:
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| API Routes | ✅ Active | `api/columnline/routes.py` |
+| Models | ✅ Active | `api/columnline/models.py` |
+| Repository | ✅ Active | `api/columnline/repository.py` |
+| Claims Merge | ✅ Active | `api/columnline/claims_merge.py` |
+| Prompts (v2) | ✅ Active | `columnline_app/api_migration/make_scenarios_and_supabase_tables/prompts_v2/` |
+| Table Docs | ✅ Active | `columnline_app/api_migration/make_scenarios_and_supabase_tables/supabase_tables/` |
+
 ---
 
 ## Directory Structure
 
 | Path | Purpose |
 |------|---------|
-| `columnline_app/` | All migration work is isolated here |
-| `columnline_app/api_migration/execution/` | Production-ready scripts |
-| `columnline_app/api_migration/make_scenarios_and_csvs/` | Raw Make.com exports and Google Sheets CSVs |
-| `columnline_app/api_migration/docs/` | **Documentation for all blueprints and data sheets** |
-| `columnline_app/api_migration/temp/` | Temporary/scratch files |
+| `api/columnline/` | **Active API code** - routes, models, repository |
+| `columnline_app/api_migration/make_scenarios_and_supabase_tables/` | Make.com exports + table docs |
+| `columnline_app/api_migration/make_scenarios_and_supabase_tables/prompts_v2/` | **Active prompts** (sync to v2_prompts table) |
+| `columnline_app/api_migration/make_scenarios_and_supabase_tables/supabase_tables/` | Human-readable table documentation |
+| `columnline_app/api_migration/_archive/` | Archived CSVs, old docs (historical only) |
 
 ---
 
-## Documentation Reference
+## Supabase Tables
 
-All Make.com blueprints and CSV data sheets have been analyzed and documented.
+### Config Tables (Persist across runs)
+| Table | Purpose |
+|-------|---------|
+| `v2_clients` | Client configurations (ICP, industry research) |
+| `v2_prompts` | All 31+ prompts used in pipeline steps |
+| `v2_section_definitions` | Dossier section templates |
 
-### Blueprint Documentation (`docs/blueprints/`)
+### Execution Tables (Created per run)
+| Table | Purpose |
+|-------|---------|
+| `v2_runs` | Pipeline run metadata |
+| `v2_dossiers` | Final assembled dossiers |
+| `v2_pipeline_steps` | Individual step executions |
+| `v2_claims` | Extracted claims from research |
+| `v2_merged_claims` | Consolidated claims (patches applied) |
+| `v2_context_packs` | Compressed context for downstream |
+| `v2_sections` | Written dossier sections |
+| `v2_contacts` | Enriched contact records |
 
-| File | Blueprint | Purpose |
-|------|-----------|---------|
-| [00-MAIN_DOSSIER_PIPELINE.md](columnline_app/api_migration/docs/blueprints/00-MAIN_DOSSIER_PIPELINE.md) | MAIN_DOSSIER_PIPELINE.json | Master orchestrator - calls all child blueprints |
-| [00A-CLIENT_ONBOARDING.md](columnline_app/api_migration/docs/blueprints/00A-CLIENT_ONBOARDING.md) | _0A_CLIENT_ONBOARDING | Processes raw client input into configs |
-| [00B-PREP_INPUTS.md](columnline_app/api_migration/docs/blueprints/00B-PREP_INPUTS.md) | _0B_PREP_INPUTS | Refines ICP, Industry, Research, Seed configs |
-| [00C-BATCH_COMPOSER.md](columnline_app/api_migration/docs/blueprints/00C-BATCH_COMPOSER.md) | _0C_BATCH_COMPOSER | Plans batch execution strategy |
-| [01-SEARCH_AND_SIGNAL.md](columnline_app/api_migration/docs/blueprints/01-SEARCH_AND_SIGNAL.md) | 01AND02_SEARCH_AND_SIGNAL | Discovers leads via web search |
-| [03-DEEP_RESEARCH_STEPS.md](columnline_app/api_migration/docs/blueprints/03-DEEP_RESEARCH_STEPS.md) | 03_AND_04_SEQUENTIAL_DEEP_RESEARCH | Entity + Signal deep research (async) |
-| [05A-ENRICH_LEAD.md](columnline_app/api_migration/docs/blueprints/05A-ENRICH_LEAD.md) | 05A_ENRICH_LEAD | Lead enrichment research |
-| [05B-ENRICH_OPPORTUNITY.md](columnline_app/api_migration/docs/blueprints/05B-ENRICH_OPPORTUNITY.md) | 05B_ENRICH_OPPORTUNITY | Opportunity enrichment research |
-| [05C-CLIENT_SPECIFIC.md](columnline_app/api_migration/docs/blueprints/05C-CLIENT_SPECIFIC.md) | 05C_CLIENT_SPECIFIC | Client-specific research |
-| [06-ENRICH_CONTACTS.md](columnline_app/api_migration/docs/blueprints/06-ENRICH_CONTACTS.md) | 06_ENRICH_CONTACTS + 06.2 | Contact discovery + parallel enrichment |
-| [07B-INSIGHT.md](columnline_app/api_migration/docs/blueprints/07B-INSIGHT.md) | 07B_INSIGHT | Claims merge + context pack building |
-| [08-MEDIA.md](columnline_app/api_migration/docs/blueprints/08-MEDIA.md) | 08_MEDIA | Media/news discovery |
-| [09-DOSSIER_PLAN.md](columnline_app/api_migration/docs/blueprints/09-DOSSIER_PLAN.md) | 09_DOSSIER_PLAN | Dossier structure planning |
-| [10-WRITERS.md](columnline_app/api_migration/docs/blueprints/10-WRITERS.md) | WRITER_* (6 blueprints) | Section writers run in parallel |
-
-### CSV/Data Sheet Documentation (`docs/csvs/`)
-
-| File | Sheet | Purpose |
-|------|-------|---------|
-| [01-INPUTS.md](columnline_app/api_migration/docs/csvs/01-INPUTS.md) | Inputs | Client configs (ICP, Industry, Research Context, Seed) |
-| [02-PROMPTS.md](columnline_app/api_migration/docs/csvs/02-PROMPTS.md) | Prompts | Live testing harness for all prompts |
-| [03-MASTER.md](columnline_app/api_migration/docs/csvs/03-MASTER.md) | MASTER | Control panel toggles |
-| [04-DOSSIER_SECTIONS.md](columnline_app/api_migration/docs/csvs/04-DOSSIER_SECTIONS.md) | DOSSIER SECTIONS | Section writer prompts + output schemas |
-| [05-CONTACTS.md](columnline_app/api_migration/docs/csvs/05-CONTACTS.md) | Contacts | Enriched contact data |
-| [06-OTHER_SHEETS.md](columnline_app/api_migration/docs/csvs/06-OTHER_SHEETS.md) | Clients, Dossiers, Onboarding, etc. | Supporting sheets |
+See `supabase_tables/*.md` for detailed docs on each table.
 
 ---
 
-## Key Patterns Discovered
+## Key API Endpoints
 
-### Async Polling Pattern
-Make.com uses a polling pattern for async operations:
-```
-Trigger → BasicRepeater → Sleep(30s) → HTTP GET status → Router (break if complete)
-```
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/columnline/configs/{client_id}` | GET | Fetch client config + all prompts |
+| `/columnline/runs` | POST | Create new pipeline run |
+| `/columnline/steps/prepare` | POST | Prepare step input + return prompt |
+| `/columnline/steps/complete` | POST | Store step output |
+| `/columnline/steps/transition` | POST | Complete + prepare next (combined) |
 
-### Claims System
-1. Each research step extracts atomic claims (types: SIGNAL, CONTACT, ENTITY, RELATIONSHIP, OPPORTUNITY, METRIC, ATTRIBUTE, NOTE)
-2. Claims merge at `07B_INSIGHT` step
-3. Context packs built for downstream consumers
+---
 
-### Parallel Execution
-- Writers (WRITER_*) run in parallel via `CallSubscenario`
-- Contact enrichment (06.2) runs in parallel for each contact
+## Key Patterns
+
+### Claims + Narratives
+Downstream steps receive BOTH:
+- `signal_discovery_claims` + `signal_discovery_narrative`
+- `entity_research_claims` + `entity_research_narrative`
+- etc.
+
+### Patch-Based Merge
+Instead of LLM rewriting all claims:
+1. LLM generates ~20 targeted patches
+2. Python code applies patches programmatically
+3. More efficient, preserves originals, transparent
 
 ### Model Usage
 | Model | Use Case |
 |-------|----------|
 | `gpt-4.1` | Sync calls (most steps) |
-| `o4-mini-deep-research` | Async deep research (03, 04, 05A, 05B, 05C) |
-
-### Contact Enrichment Flow
-1. Contact Discovery (Agent SDK) → Names + LinkedIn URLs
-2. Apify LinkedIn Scraper → Profile data, company info, auto-discovered email
-3. AnyMailFinder → SMTP-verified email (if not found by Apify)
-4. Store in v2_contacts table
+| `gpt-5.2` | Media step (Firecrawl MCP) |
+| `o4-mini-deep-research` | Async deep research (background) |
 
 ---
 
-## Migration Roadmap
+## Make.com Blueprint Files
 
-See the full plan: `~/.claude/plans/synthetic-finding-perlis.md`
+Raw exports from Make.com (for reference/parsing):
 
-**Phase 1**: Understand workflows (COMPLETE - all docs generated)
-**Phase 2**: Create v2 Supabase schema
-**Phase 3**: Build pipeline runner
-**Phase 4**: Build prompt admin dashboard
-**Phase 5**: Migrate steps to Python workers
-**Phase 6**: Integrate with Next.js app
-**Phase 7**: Testing & cutover
+| File | Scenario |
+|------|----------|
+| `MAIN_DOSSIER_PIPELINE.json` | Master orchestrator |
+| `01AND02_SEARCH_AND_SIGNAL.blueprint.json` | Search + Signal Discovery |
+| `03_AND_04_SEQUENTIAL_DEEP_RESEARCH_STEPS.blueprint.json` | Entity + Contact Research |
+| `05A_ENRICH_LEAD.blueprint.json` | Lead Enrichment |
+| `05B_ENRICH_OPPORTUNITY.blueprint.json` | Opportunity Enrichment |
+| `05C_CLIENT_SPECIFIC.blueprint.json` | Client-Specific Research |
+| `06_ENRICH_CONTACTS.blueprint.json` | Contact Enrichment |
+| `07B_INSIGHT.blueprint.json` | Insight + Claims Merge |
+| `08_MEDIA.blueprint.json` | Media/Images |
+| `09_DOSSIER_PLAN.blueprint.json` | Dossier Planning |
+| `WRITER_*.blueprint.json` | Section Writers (6 files) |
+
+Use `/parsing-make-blueprints` skill to parse these into business logic docs.
 
 ---
 
 ## Quick Reference
 
-### Project Directive
-Reference `columnline_app/columnline_app_directive.md` for current project state.
+### Test Run
+```bash
+# Get latest IDs
+curl "https://api.columnline.dev/columnline/runs?limit=1"
 
-### External Resources
-- Use Context7 for Make.com documentation
-- Use Firecrawl for web scraping needs
+# Prepare a step
+curl -X POST "https://api.columnline.dev/columnline/steps/prepare" \
+  -H "Content-Type: application/json" \
+  -d '{"run_id": "RUN_...", "client_id": "CLT_...", "step_names": ["2_SIGNAL_DISCOVERY"]}'
+```
 
-### Raw Files Location
-- Make.com JSON exports: `api_migration/make_scenarios_and_csvs/*.blueprint.json`
-- Google Sheets CSVs: `api_migration/make_scenarios_and_csvs/*.csv`
+### Deploy Changes
+```bash
+git add -A && git commit -m "..." && git push
+# GitHub Actions auto-deploys to api.columnline.dev
+```
+
+### Clear Test Data
+Use the clear script: `tmp/clear_v2_runs.py`
 
 ---
 
-## API Reference Documentation (`docs/`)
+## Next Steps (Integration)
 
-| File | APIs | Purpose |
-|------|------|---------|
-| [ENRICHMENT_APIS.md](columnline_app/api_migration/docs/ENRICHMENT_APIS.md) | AnyMailFinder, Apify | Contact email lookup, LinkedIn profile scraping |
-| [OPENAI_REFERENCE.md](columnline_app/api_migration/docs/OPENAI_REFERENCE.md) | OpenAI | Chat Completions, Deep Research, Agents SDK, Structured Outputs |
-| [CLAIMS_SYSTEM.md](columnline_app/api_migration/docs/CLAIMS_SYSTEM.md) | - | Claims extraction, merge, and routing patterns |
-| [CLAIMS_STORAGE_SCHEMA.md](columnline_app/api_migration/docs/CLAIMS_STORAGE_SCHEMA.md) | Supabase | v2_* database tables for claims storage |
-| [PROMPT_WORKBENCH.md](columnline_app/api_migration/docs/PROMPT_WORKBENCH.md) | - | Streamlit admin dashboard specification |
+When ready to render dossiers in Columnline app:
+1. Add `production_client_id` column to `v2_clients`
+2. Create transform layer (`v2_dossiers` → production `dossiers` table)
+3. Add `/columnline/publish/{run_id}` endpoint
+4. Map v2 JSONB output to production schema
 
-### External API Quick Reference
-
-| API | Base URL | Auth | Cost |
-|-----|----------|------|------|
-| **AnyMailFinder** | `https://api.anymailfinder.com/v5.1/` | `Authorization: API_KEY` | 1 credit/valid email |
-| **Apify LinkedIn** | `dev_fusion/linkedin-profile-scraper` | Apify token | $10/1000 profiles |
-| **OpenAI Chat** | `https://api.openai.com/v1/chat/completions` | Bearer token | See pricing |
-| **OpenAI Deep Research** | `https://api.openai.com/v1/responses` | Bearer token | $2-10/M tokens |
+See plan notes in `~/.claude/plans/` for full integration strategy.
