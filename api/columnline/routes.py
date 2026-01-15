@@ -123,42 +123,71 @@ def extract_clean_content(openai_output):
 
 def fetch_all_individual_claims(repo, run_id):
     """
-    Fetch ALL individual claims from all extraction steps (not merged)
+    Fetch ALL individual claims AND narratives from all extraction steps
+
+    For each research step, returns BOTH:
+    - The extracted claims (from CLAIMS_EXTRACTION)
+    - The original narrative (from the research step itself)
 
     Returns dict with keys like:
-    - signal_discovery_claims
-    - entity_research_claims
-    - contact_discovery_claims
-    - enrich_lead_claims
-    - enrich_opportunity_claims
-    - client_specific_claims
-    - insight_claims
+    - signal_discovery_claims + signal_discovery_narrative
+    - entity_research_claims + entity_research_narrative
+    - contact_discovery_claims + contact_discovery_narrative
+    - enrich_lead_claims + enrich_lead_narrative
+    - enrich_opportunity_claims + enrich_opportunity_narrative
+    - client_specific_claims + client_specific_narrative
+    - insight_claims + insight_narrative
     """
     claims_dict = {}
 
     # Find all completed claims extraction steps
     all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
+    # Mapping of research step names to dict keys
+    step_mappings = {
+        '2_SIGNAL_DISCOVERY': ('signal_discovery_claims', 'signal_discovery_narrative'),
+        '3_ENTITY_RESEARCH': ('entity_research_claims', 'entity_research_narrative'),
+        '4_CONTACT_DISCOVERY': ('contact_discovery_claims', 'contact_discovery_narrative'),
+        '5A_ENRICH_LEAD': ('enrich_lead_claims', 'enrich_lead_narrative'),
+        '5B_ENRICH_OPPORTUNITY': ('enrich_opportunity_claims', 'enrich_opportunity_narrative'),
+        '5C_CLIENT_SPECIFIC': ('client_specific_claims', 'client_specific_narrative'),
+        '07B_INSIGHT': ('insight_claims', 'insight_narrative')
+    }
+
     for claims_step in all_claims_steps.data:
         # Figure out which research step this came from by looking at the input
         step_input_data = claims_step.get('input', {})
         claims_output = extract_clean_content(claims_step.get('output'))
 
-        # Add with descriptive key based on which step produced these claims
+        # Determine the source research step
+        source_step_name = None
         if '2_signal_discovery_output' in step_input_data:
-            claims_dict["signal_discovery_claims"] = claims_output
+            source_step_name = '2_SIGNAL_DISCOVERY'
         elif '3_entity_research_output' in step_input_data:
-            claims_dict["entity_research_claims"] = claims_output
+            source_step_name = '3_ENTITY_RESEARCH'
         elif '4_contact_discovery_output' in step_input_data:
-            claims_dict["contact_discovery_claims"] = claims_output
+            source_step_name = '4_CONTACT_DISCOVERY'
         elif '5a_enrich_lead_output' in step_input_data:
-            claims_dict["enrich_lead_claims"] = claims_output
+            source_step_name = '5A_ENRICH_LEAD'
         elif '5b_enrich_opportunity_output' in step_input_data:
-            claims_dict["enrich_opportunity_claims"] = claims_output
+            source_step_name = '5B_ENRICH_OPPORTUNITY'
         elif '5c_client_specific_output' in step_input_data:
-            claims_dict["client_specific_claims"] = claims_output
+            source_step_name = '5C_CLIENT_SPECIFIC'
         elif '07b_insight_output' in step_input_data:
-            claims_dict["insight_claims"] = claims_output
+            source_step_name = '07B_INSIGHT'
+
+        if source_step_name and source_step_name in step_mappings:
+            claims_key, narrative_key = step_mappings[source_step_name]
+
+            # Store the claims
+            claims_dict[claims_key] = claims_output
+
+            # Fetch the original narrative from the research step
+            narrative_step = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('step_name', source_step_name).eq('status', 'completed').execute()
+
+            if narrative_step.data:
+                narrative_output = extract_clean_content(narrative_step.data[0].get('output'))
+                claims_dict[narrative_key] = narrative_output
 
     return claims_dict
 
@@ -829,6 +858,7 @@ async def complete_steps(request: StepCompleteRequest):
     # Find step_ids for these step names
     completed_steps = []
     contacts_array = None
+    media_data = None
 
     for output_item in request.outputs:
         # Find the pipeline step
@@ -893,12 +923,27 @@ async def complete_steps(request: StepCompleteRequest):
                 # Fallback: empty array so Make.com doesn't break
                 contacts_array = []
 
+        # SPECIAL: If completing 8_MEDIA, extract complete media output (as-is from GPT-5.2)
+        if output_item.step_name == "8_MEDIA":
+            clean_content = extract_clean_content(output_to_store)
+            if isinstance(clean_content, dict):
+                # Store the entire media output with:
+                # - image_assets (array of images with metadata)
+                # - request_date, project_name, company, location
+                # - notes_for_span_sales_team
+                # - sources_used
+                media_data = clean_content
+            else:
+                # Fallback: empty dict so Make.com doesn't break
+                media_data = {}
+
     return StepCompleteResponse(
         success=True,
         run_id=request.run_id,
         steps_completed=completed_steps,
         message=f"{len(completed_steps)} step(s) completed successfully",
-        contacts=contacts_array
+        contacts=contacts_array,
+        media_data=media_data
     )
 
 

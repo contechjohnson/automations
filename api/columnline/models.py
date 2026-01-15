@@ -253,6 +253,7 @@ class StepCompleteResponse(BaseModel):
     steps_completed: List[str]
     message: str = "Steps completed successfully"
     contacts: Optional[List[Dict[str, Any]]] = None  # For 6_ENRICH_CONTACTS step - array for Make.com iteration
+    media_data: Optional[Dict[str, Any]] = None  # For 8_MEDIA step - complete media output with image_assets array
 
 
 class StepTransitionRequest(BaseModel):
