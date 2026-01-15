@@ -548,14 +548,14 @@ async def prepare_steps(request: StepPrepareRequest):
             if signal_output:
                 step_input["signal_discovery_output"] = extract_clean_content(signal_output.get('output'))
 
-        # Claims extraction needs the previous research output
+        # Claims extraction needs the previous research/enrich output
         if "CLAIM" in step_name.upper() or step_name == "CLAIMS_EXTRACTION":
-            # Try to get most recent research output (could be signal, entity, or contact)
-            for research_step in ["4_CONTACT_DISCOVERY", "3_ENTITY_RESEARCH", "2_SIGNAL_DISCOVERY"]:
+            # Try to get most recent research/enrich output (could be signal, entity, contact, or enrich steps)
+            for research_step in ["5C_CLIENT_SPECIFIC", "5B_ENRICH_OPPORTUNITY", "5A_ENRICH_LEAD", "4_CONTACT_DISCOVERY", "3_ENTITY_RESEARCH", "2_SIGNAL_DISCOVERY"]:
                 research_output = repo.get_completed_step(request.run_id, research_step)
                 if research_output:
                     step_input[f"{research_step.lower()}_output"] = extract_clean_content(research_output.get('output'))
-                    break  # Use most recent research step
+                    break  # Use most recent research/enrich step
 
         # Context Pack needs ALL claims extracted so far
         if step_name == "CONTEXT_PACK":
@@ -814,8 +814,8 @@ async def transition_step(request: StepTransitionRequest):
         step_input["search_builder_output"] = clean_output
 
     if request.next_step_name == "CLAIMS_EXTRACTION":
-        # Claims needs the research output (just completed)
-        if request.completed_step_name in ["3_ENTITY_RESEARCH", "4_CONTACT_DISCOVERY", "2_SIGNAL_DISCOVERY"]:
+        # Claims needs the research/enrich output (just completed)
+        if request.completed_step_name in ["3_ENTITY_RESEARCH", "4_CONTACT_DISCOVERY", "2_SIGNAL_DISCOVERY", "5A_ENRICH_LEAD", "5B_ENRICH_OPPORTUNITY", "5C_CLIENT_SPECIFIC"]:
             step_input[f"{request.completed_step_name.lower()}_output"] = clean_output
 
     if request.next_step_name == "CONTEXT_PACK":
