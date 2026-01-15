@@ -121,6 +121,48 @@ def extract_clean_content(openai_output):
     return openai_output
 
 
+def fetch_all_individual_claims(repo, run_id):
+    """
+    Fetch ALL individual claims from all extraction steps (not merged)
+
+    Returns dict with keys like:
+    - signal_discovery_claims
+    - entity_research_claims
+    - contact_discovery_claims
+    - enrich_lead_claims
+    - enrich_opportunity_claims
+    - client_specific_claims
+    - insight_claims
+    """
+    claims_dict = {}
+
+    # Find all completed claims extraction steps
+    all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+
+    for claims_step in all_claims_steps.data:
+        # Figure out which research step this came from by looking at the input
+        step_input_data = claims_step.get('input', {})
+        claims_output = extract_clean_content(claims_step.get('output'))
+
+        # Add with descriptive key based on which step produced these claims
+        if '2_signal_discovery_output' in step_input_data:
+            claims_dict["signal_discovery_claims"] = claims_output
+        elif '3_entity_research_output' in step_input_data:
+            claims_dict["entity_research_claims"] = claims_output
+        elif '4_contact_discovery_output' in step_input_data:
+            claims_dict["contact_discovery_claims"] = claims_output
+        elif '5a_enrich_lead_output' in step_input_data:
+            claims_dict["enrich_lead_claims"] = claims_output
+        elif '5b_enrich_opportunity_output' in step_input_data:
+            claims_dict["enrich_opportunity_claims"] = claims_output
+        elif '5c_client_specific_output' in step_input_data:
+            claims_dict["client_specific_claims"] = claims_output
+        elif '07b_insight_output' in step_input_data:
+            claims_dict["insight_claims"] = claims_output
+
+    return claims_dict
+
+
 # ============================================================================
 # CONFIG ENDPOINTS (for sub-scenarios)
 # ============================================================================
@@ -608,33 +650,47 @@ async def prepare_steps(request: StepPrepareRequest):
                 elif '5c_client_specific_output' in step_input_data:
                     step_input["client_specific_claims"] = claims_output
 
-        # Dossier Plan needs the context pack from 07B
+        # Dossier Plan needs context pack + ALL individual claims
         if step_name == "9_DOSSIER_PLAN":
             context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
 
-        # Enrich Contacts needs context pack from 7B
+            # Pass ALL individual claims (not merged)
+            all_claims = fetch_all_individual_claims(repo, request.run_id)
+            step_input.update(all_claims)
+
+        # Enrich Contacts needs context pack from 7B + ALL individual claims
         if step_name == "6_ENRICH_CONTACTS":
             context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
 
-            # Also needs merged claims
-            merged_claims_output = repo.get_completed_step(request.run_id, "MERGE_CLAIMS")
-            if merged_claims_output:
-                step_input["merged_claims"] = extract_clean_content(merged_claims_output.get('output'))
+            # Pass ALL individual claims (not merged - merged was bottleneck with only 24 claims)
+            all_claims = fetch_all_individual_claims(repo, request.run_id)
+            step_input.update(all_claims)
 
-        # Individual contact enrichment needs merged claims (contact_data passed by Make.com)
+        # Individual contact enrichment needs ALL individual claims (contact_data passed by Make.com)
         if step_name == "6_ENRICH_CONTACT_INDIVIDUAL":
-            merged_claims_output = repo.get_completed_step(request.run_id, "MERGE_CLAIMS")
-            if merged_claims_output:
-                step_input["merged_claims"] = extract_clean_content(merged_claims_output.get('output'))
+            # Pass ALL individual claims (not merged)
+            all_claims = fetch_all_individual_claims(repo, request.run_id)
+            step_input.update(all_claims)
+
+        # Media enrichment needs context pack + ALL individual claims
+        if step_name == "8_MEDIA":
+            # Fetch context pack
+            context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
+            if context_pack_output:
+                step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
+
+            # Pass ALL individual claims (not merged)
+            all_claims = fetch_all_individual_claims(repo, request.run_id)
+            step_input.update(all_claims)
 
         # Copy needs enriched contact data (will be passed via transition or Make.com)
         # 10A_COPY and 10B_COPY_CLIENT_OVERRIDE auto-fetch handled in transition logic
 
-        # All section writers need: dossier_plan + context_pack + merged_claims
+        # All section writers need: dossier_plan + context_pack + ALL individual claims
         if step_name in ["10_WRITER_INTRO", "10_WRITER_SIGNALS", "10_WRITER_LEAD_INTELLIGENCE", "10_WRITER_STRATEGY", "10_WRITER_OPPORTUNITY", "10_WRITER_CLIENT_SPECIFIC"]:
             # Fetch dossier plan
             dossier_plan_output = repo.get_completed_step(request.run_id, "9_DOSSIER_PLAN")
@@ -646,10 +702,9 @@ async def prepare_steps(request: StepPrepareRequest):
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
 
-            # Fetch merged claims
-            merged_claims_output = repo.get_completed_step(request.run_id, "MERGE_CLAIMS")
-            if merged_claims_output:
-                step_input["merged_claims"] = extract_clean_content(merged_claims_output.get('output'))
+            # Pass ALL individual claims (not merged)
+            all_claims = fetch_all_individual_claims(repo, request.run_id)
+            step_input.update(all_claims)
 
         # Merge Claims needs ALL claims including insight claims
         if step_name == "MERGE_CLAIMS":
@@ -690,6 +745,7 @@ async def prepare_steps(request: StepPrepareRequest):
             "MERGE_CLAIMS": "gpt-4.1",
             "CLAIMS_EXTRACTION": "gpt-4.1",
             "CONTEXT_PACK": "gpt-4.1",
+            "8_MEDIA": "gpt-5.2",
             "9_DOSSIER_PLAN": "gpt-4.1",
             "10_WRITER_INTRO": "gpt-4.1",
             "10_WRITER_SIGNALS": "gpt-4.1",
@@ -1067,6 +1123,7 @@ async def transition_step(request: StepTransitionRequest):
         "MERGE_CLAIMS": "gpt-4.1",
         "CLAIMS_EXTRACTION": "gpt-4.1",
         "CONTEXT_PACK": "gpt-4.1",
+        "8_MEDIA": "gpt-5.2",
         "9_DOSSIER_PLAN": "gpt-4.1",
         "10_WRITER_INTRO": "gpt-4.1",
         "10_WRITER_SIGNALS": "gpt-4.1",

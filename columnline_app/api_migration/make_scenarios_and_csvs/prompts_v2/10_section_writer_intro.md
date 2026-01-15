@@ -10,20 +10,32 @@
 
 ## Input Variables
 
-**merged_claims_json**
-All claims from MergedClaims sheet (consolidated, deduplicated facts)
+**context_pack**
+Rich context from CONTEXT_PACK step
+
+**signal_discovery_claims**
+Claims from Signal Discovery step
+
+**entity_research_claims**
+Claims from Entity Research step
+
+**contact_discovery_claims**
+Claims from Contact Discovery step
+
+**enrich_lead_claims**
+Claims from Enrich Lead step
+
+**enrich_opportunity_claims**
+Claims from Enrich Opportunity step
+
+**client_specific_claims**
+Claims from Client Specific step
+
+**insight_claims**
+Claims from Insight (07B) step
 
 **dossier_plan**
 Routing suggestions from dossier planning step (which claims go to which sections)
-
-**client_name**
-Client company name
-
-**client_services**
-Client's core services/offerings
-
-**client_differentiators**
-Client's key differentiators (ESOP, Butler Builder, etc.)
 
 ---
 
@@ -38,9 +50,9 @@ Write the INTRO section that provides: company name, one-liner summary, the posi
 This section populates the **`find_lead`** JSONB column in the final dossier.
 
 ### What You Receive
-- Merged claims (all research facts with sources)
+- ALL individual claims from each research step (Signal, Entity, Contact Discovery, Enrich Lead, Enrich Opportunity, Client Specific, Insight)
+- Context pack with synthesized insights
 - Dossier plan (routing guidance on which claims are relevant to intro)
-- Client context (name, services, differentiators)
 
 ### Instructions
 

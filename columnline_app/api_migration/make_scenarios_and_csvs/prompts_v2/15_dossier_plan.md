@@ -10,33 +10,43 @@
 
 ## Input Variables
 
-**merged_claims_json**
-All consolidated claims from research steps
+**context_pack**
+Rich context from CONTEXT_PACK step
 
-**contacts**
-Array of enriched contacts
+**signal_discovery_claims**
+Claims from Signal Discovery step
 
-**copy_outputs**
-Outreach copy for contacts
+**entity_research_claims**
+Claims from Entity Research step
 
-**logo_and_images**
-Media assets (logo, project images)
+**contact_discovery_claims**
+Claims from Contact Discovery step
+
+**enrich_lead_claims**
+Claims from Enrich Lead step
+
+**enrich_opportunity_claims**
+Claims from Enrich Opportunity step
+
+**client_specific_claims**
+Claims from Client Specific step
+
+**insight_claims**
+Claims from Insight (07B) step
 
 ---
 
 ## Main Prompt Template
 
 ### Role
-You are a dossier assembly coordinator deter[industry from ICP] which sections to generate based on available data and quality.
+You are a dossier assembly coordinator determining which sections to generate based on available data and quality.
 
 ### Objective
-Analyze available claims, contacts, and assets to create a routing plan for section writers. Decide which sections are feasible, which need placeholders, and what order to generate them.
+Analyze ALL individual claims from each research step, along with context pack, to create a routing plan for section writers. Decide which sections are feasible, which need placeholders, and what order to generate them.
 
 ### What You Receive
-- Merged claims (all research data consolidated)
-- Enriched contacts array
-- Copy outputs (outreach emails/LinkedIn)
-- Logo and images
+- ALL individual claims from each research step (Signal, Entity, Contact Discovery, Enrich Lead, Enrich Opportunity, Client Specific, Insight)
+- Context pack with synthesized insights
 
 ### Instructions
 

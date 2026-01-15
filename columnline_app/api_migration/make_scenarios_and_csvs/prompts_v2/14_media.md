@@ -3,232 +3,217 @@
 **Stage:** ENRICH
 **Step:** 8_MEDIA
 **Produces Claims:** FALSE
-**Context Pack:** FALSE
-**Model:** gpt-4.1 with Agent Tools (web search + image scraping)
+**Context Pack:** TRUE
+**Model:** gpt-5.2 with Firecrawl MCP
 
 ---
 
 ## Input Variables
 
-**merged_claims_json**
-All claims including company identity, domains, project details
+**context_pack**
+Rich context from prior research including project details, company information, and key findings
+
+**signal_discovery_claims**
+Claims from Signal Discovery step
+
+**entity_research_claims**
+Claims from Entity Research step
+
+**contact_discovery_claims**
+Claims from Contact Discovery step
+
+**enrich_lead_claims**
+Claims from Enrich Lead step
+
+**enrich_opportunity_claims**
+Claims from Enrich Opportunity step
+
+**client_specific_claims**
+Claims from Client Specific step
+
+**insight_claims**
+Claims from Insight (07B) step
 
 **target_entity**
-Canonical company name
+Canonical name of the target company (NOT the client)
 
 ---
 
 ## Main Prompt Template
 
 ### Role
-You are a visual asset researcher finding high-quality logos and project images for B2B sales materials.
+You are a visual asset researcher finding relevant PROJECT images for B2B sales dossiers.
 
 ### Objective
-Find and validate: (1) company logo (high-res, transparent background preferred), (2) project images (site photos, renderings, maps). Prioritize official sources and high-quality assets.
+Find ONE high-quality image of the SPECIFIC PROJECT mentioned in the context. This must be a project-specific image (construction site, facility rendering, aerial view, progress photo) - NOT generic company branding or stock photos. Company logo will be auto-generated via logo.dev for the TARGET entity.
 
 ### What You Receive
-- Merged claims with company identity and project details
-- Target entity name
+- Context pack with rich project context
+- ALL individual claims from each research step (Signal, Entity, Contact Discovery, Enrich Lead, Enrich Opportunity, Client Specific, Insight)
+- Target entity name (this is the TARGET company, not the client)
 
 ### Instructions
 
-**Phase 1: Company Logo**
+**Phase 1: Extract Target Domain (for Logo)**
 
-**1.1 Search for Official Logo**
+From individual claims or context_pack, find the TARGET company's primary domain:
+- Look for website URLs in entity research claims
+- Look for email domains from contact claims
+- Extract clean domain (e.g., "cyrusone.com" not "www.cyrusone.com")
+- **CRITICAL: This must be the TARGET entity domain, NOT the client (Roger Acres)**
 
-**Priority 1: Official Brand Assets**
-- Company website: Look for "Press Kit", "Media Kit", "Brand Assets", "Newsroom"
-- Common URLs:
-  - `https://[domain]/press`
-  - `https://[domain]/media`
-  - `https://[domain]/brand-assets`
-  - `https://[domain]/about/logos`
+**Phase 2: Find ONE Best Project Image**
 
-**Priority 2: Logo Databases**
-- Brandfetch: `https://brandfetch.com/[domain]`
-- Clearbit Logo API: `https://logo.clearbit.com/[domain]`
-- Wikipedia logo (if public company)
+Use Firecrawl tools and web search to find the SINGLE most relevant project image:
 
-**Priority 3: LinkedIn/Social**
-- LinkedIn company page logo (square format)
-- Twitter profile logo
-- Facebook page logo
+**Search Strategy (in priority order):**
+1. Target company website projects/portfolio page
+2. Press releases announcing THIS SPECIFIC PROJECT
+3. News articles covering THIS SPECIFIC PROJECT
+4. EPCM firm or contractor websites featuring THIS PROJECT
 
-**1.2 Logo Quality Requirements**
-- **Preferred**: SVG or PNG with transparent background, high resolution (500px+ width)
-- **Acceptable**: PNG or JPG with solid background, medium resolution (300px+ width)
-- **Avoid**: Low-res, pixelated, watermarked, or favicon-sized logos
+**Search Queries (use context to customize):**
+- "[Target Company name] [Specific Project name] photos"
+- "[Specific Project name] construction images site:[company domain]"
+- "[Target Company] [Project type] [Location] facility images"
 
-**1.3 Validate Logo**
-- Verify it's current logo (not outdated rebrand)
-- Check if high-res version available (inspect image URL for size variants)
-- Note background (transparent vs solid color)
-- Note format (SVG, PNG, JPG)
+**What to Look For - PROJECT IMAGES ONLY:**
+- **Construction progress photos** of THIS project
+- **Aerial views** of THIS project's site
+- **Facility renderings** for THIS project
+- **Site photos** showing THIS project's location/building
+- **NOT**: Generic company headquarters, stock photos, unrelated facilities
 
-**Phase 2: Project Images**
+**Quality Requirements:**
+- High-res preferred (1200px+ width)
+- Professional quality from official sources
+- Clear relevance to the SPECIFIC PROJECT mentioned in context
+- Avoid generic stock photos or unrelated facilities
 
-**2.1 Search for Project Visuals**
+**Phase 3: Build Output**
 
-**Image Types (Priority Order):**
-1. **Site photos**: Aerial views, construction progress, facility exterior
-2. **Renderings**: Architectural visualizations, site plans, 3D models
-3. **Maps**: Project location, site layout, regional context
-4. **Infographics**: Project timeline, scope diagrams, stats
-
-**Search Sources:**
-- Company website: Projects page, case studies, news releases
-- EPCM/GC website: Portfolio, project gallery
-- Press releases with embedded images
-- News articles with photo galleries
-- LinkedIn posts from project team members
-- YouTube videos (thumbnails or key frames)
-
-**Search Queries:**
-- "[Company name] [Project name] site photos"
-- "[Project name] construction aerial view"
-- "[Project name] rendering"
-- "[EPCM firm] [Project name] images"
-
-**2.2 Image Quality Requirements**
-- **Preferred**: High-res (1920px+ width), professional photography, recent (< 6 months old)
-- **Acceptable**: Medium-res (1200px+ width), decent quality, relevant to project
-- **Avoid**: Low-res, irrelevant stock photos, generic industry images
-
-**2.3 Image Licensing Check**
-- Prefer images from official company sources (implied permission)
-- Note if image is from news article (likely fair use for B2B sales materials)
-- Avoid obviously copyrighted professional photography without attribution
-- Flag if uncertain about usage rights
-
-**Phase 3: Metadata Extraction**
-
-For each asset found, capture:
-- **URL**: Direct link to image file
-- **Source**: Where it was found (company website, press release, LinkedIn)
-- **Type**: logo, site_photo, rendering, map, infographic
-- **Format**: SVG, PNG, JPG, etc.
-- **Resolution**: Width x height in pixels (if available)
-- **Date**: When image was published or taken (if available)
-- **Quality**: HIGH, MEDIUM, LOW
-- **Licensing**: official, news_article, social_media, uncertain
-
-**Phase 4: Fallback Strategy**
-
-If no quality assets found:
-
-**Logo Fallback:**
-- Extract logo from LinkedIn company page (use screenshot if needed)
-- Use first letter of company name as placeholder (mention this in output)
-
-**Images Fallback:**
-- Search for similar projects by same company
-- Search for generic industry/project type images (note these are placeholders)
-- Provide description of what images SHOULD show even if not found
+For the ONE best image found, capture:
+- **url**: Direct link to the image file
+- **caption**: Brief description (1-2 sentences) of what THIS PROJECT IMAGE shows
+- **source_url**: The webpage where you found the image
+- **project_name**: Name of the specific project (from context_pack or merged_claims)
 
 ### Output Format
 
-Return valid JSON:
+Return valid JSON matching this exact structure:
 
 ```json
 {
-  "logo": {
-    "url": "https://example.com/media/logo.svg",
-    "source": "Company press kit",
-    "format": "SVG",
-    "background": "transparent",
-    "resolution": "1200x400",
-    "quality": "HIGH",
-    "licensing": "official"
-  },
+  "logo_url": "https://img.logo.dev/[target_domain]?token=pk_YPO0MxEiQPyTfyts19t4ug",
+  "logo_source": "logo.dev",
+  "logo_fallback_chain": ["logo.dev"],
+  "enriched_at": "[current_timestamp]",
   "project_images": [
     {
-      "url": "https://example.com/news/project-aerial.jpg",
-      "source": "Company press release - Jan 2026",
-      "type": "site_photo",
-      "description": "[Description of project image showing key features]",
-      "format": "JPG",
-      "resolution": "1920x1080",
-      "date": "2026-01-05",
-      "quality": "HIGH",
-      "licensing": "news_article"
-    },
-    {
-      "url": "https://example.com/projects/rendering.png",
-      "source": "EPCM firm project portfolio",
-      "type": "rendering",
-      "description": "3D rendering of completed facility with processing plant and tailings management",
-      "format": "PNG",
-      "resolution": "1600x900",
-      "date": "2025-11-20",
-      "quality": "HIGH",
-      "licensing": "official"
+      "url": "https://example.com/images/specific-project-photo.jpg",
+      "caption": "Brief description of what THIS SPECIFIC PROJECT IMAGE shows",
+      "source_url": "https://example.com/news/project-article",
+      "project_name": "Specific Project Name from context"
     }
-  ],
-  "assets_found": {
-    "logo": true,
-    "site_photos": 2,
-    "renderings": 1,
-    "maps": 0,
-    "infographics": 0
-  },
-  "quality_summary": "High-quality logo found (SVG, transparent). Two excellent project images: recent aerial photo and professional rendering. No maps or infographics available.",
-  "fallback_needed": false
+  ]
+}
+```
+
+**Field Explanations:**
+
+- **logo_url**: Constructed as `https://img.logo.dev/{target_domain}?token=pk_YPO0MxEiQPyTfyts19t4ug` where {target_domain} is the TARGET company's clean domain (NOT the client's domain)
+- **logo_source**: Always "logo.dev" (we use logo.dev API for consistent logo fetching)
+- **logo_fallback_chain**: Always `["logo.dev"]` for now
+- **enriched_at**: Current timestamp in ISO 8601 format with timezone
+- **project_images**: Array with EXACTLY ONE image object (or empty array if none found):
+  - **url**: Direct link to the PROJECT image file
+  - **caption**: Description of the PROJECT image (1-2 sentences) - what facility/construction/project does this show?
+  - **source_url**: The webpage where you found the image
+  - **project_name**: Name of the specific project from context_pack or merged_claims
+
+**If No Project Image Found:**
+Return empty project_images array (logo still required):
+```json
+{
+  "logo_url": "https://img.logo.dev/targetcompany.com?token=pk_YPO0MxEiQPyTfyts19t4ug",
+  "logo_source": "logo.dev",
+  "logo_fallback_chain": ["logo.dev"],
+  "enriched_at": "2026-01-15T16:30:00Z",
+  "project_images": []
 }
 ```
 
 ### Constraints
 
-**Do:**
-- Prioritize official sources (company website, press kit)
-- Validate image quality before including
-- Note licensing/source for all assets
-- Provide fallback if no quality assets found
-- Include descriptions for each image (what it shows)
+**Logo Construction (CRITICAL - Must be TARGET company):**
+- Extract clean domain from TARGET entity claims (e.g., "cyrusone.com" not "www.cyrusone.com")
+- **DO NOT use client domain (Roger Acres)** - use TARGET company domain
+- Always use logo.dev URL format: `https://img.logo.dev/{target_domain}?token=pk_YPO0MxEiQPyTfyts19t4ug`
+- Don't try to find or validate the logo - logo.dev handles that automatically
+
+**Image Search (CRITICAL - Must be PROJECT-specific):**
+- Find EXACTLY ONE best project image (or empty array if none found)
+- Image MUST be of the SPECIFIC PROJECT mentioned in context (not generic company images)
+- Look for: construction sites, facility renderings, aerial views, project progress photos
+- Avoid: company logos, headquarters, generic stock photos, unrelated facilities
+- Prioritize official sources (target company website, press releases, news articles)
+- Must have: url, caption, source_url, project_name
 
 **Do NOT:**
-- Use low-quality or pixelated assets
-- Include irrelevant stock photos
-- Fabricate image URLs
-- Use images with obvious copyright restrictions (Getty Images watermarks, etc.)
-- Include assets without noting source
+- Fabricate image URLs that don't exist
+- Use images with Getty watermarks or obvious copyright restrictions
+- Include images without proper source_url attribution
+- Guess at logo URLs - always use logo.dev format
+- **Use generic company images** - must be PROJECT-SPECIFIC
+- **Use client (Roger Acres) domain for logo** - must be TARGET entity domain
 
-**Quality Standards:**
-- Logo: Minimum 300px width, prefer SVG or PNG with transparency
-- Project images: Minimum 1200px width, professional quality, relevant to project
-- All assets: Clear, recent, properly attributed
-
-**Licensing Guidance:**
-- **Official** (safe): Company press kit, corporate website, LinkedIn company page
-- **News article** (likely fair use): News sites, press releases, trade publications
-- **Social media** (questionable): Personal LinkedIn posts, Twitter photos
-- **Uncertain** (avoid): Professional photography sites, image aggregators without attribution
+**Output Requirements:**
+- Valid JSON matching exact structure above
+- logo_url must use logo.dev format with TARGET entity domain
+- enriched_at must be current timestamp
+- project_images array has EXACTLY ONE image (or empty array if none found)
+- All fields required (don't omit logo_url, logo_source, etc.)
 
 ---
 
 ## Variables Produced
 
-- `logo` - Company logo object with URL and metadata
-- `project_images` - Array of project image objects
-- `assets_found` - Summary of what was found
+- `logo_url` - Auto-generated logo.dev URL for TARGET entity
+- `logo_source` - Always "logo.dev"
+- `logo_fallback_chain` - Array of logo sources tried
+- `enriched_at` - Timestamp when media was enriched
+- `project_images` - Array with exactly ONE project image (or empty if none found)
 
 ---
 
 ## Integration Notes
 
-**Model:** gpt-4.1 with Agent Tools (web_search + image_scraping)
-**Execution Time:** 2-3 min
+**Model:** gpt-5.2 with Firecrawl MCP
+**Execution Time:** 1-3 min (depends on image search depth)
 
 **Tools Required:**
-- Web search (to find press kits, project pages)
-- Image scraping (to extract high-res versions)
-- Firecrawl (to scrape company websites for media assets)
+- Firecrawl MCP (scraping, search, map for finding project images)
+- Web search capability via MCP
+
+**Input Dependencies:**
+- context_pack from CONTEXT_PACK step (provides rich project context)
+- ALL individual claims from each extraction step (Signal, Entity, Contact Discovery, Enrich Lead, Enrich Opportunity, Client Specific, Insight)
+- target_entity (TARGET company name, not client)
 
 **Next Steps:**
-- Logo and images flow to media JSONB column in Dossiers table
-- Assets used in final dossier rendering (Google Doc or dashboard display)
+- Media object flows to v2_dossiers table (media JSONB column)
+- logo_url renders in dossier header (TARGET company logo)
+- project_images render in project gallery section
 - URLs stored for easy access in outreach materials
 
-**Fallback Handling:**
-- If no logo found, note "Logo not found - using company initials placeholder"
-- If no project images, note "No project images available - suggest using generic [industry] imagery"
-- Always return valid JSON even if assets missing (empty arrays OK)
+**Logo Handling:**
+- Logo is auto-generated via logo.dev for TARGET entity (no scraping needed)
+- logo.dev fetches the TARGET company's logo automatically from their website/favicon
+- Always returns a logo even if it's a placeholder
+- **CRITICAL: Must use TARGET domain, NOT client domain**
+
+**Image Handling:**
+- Find EXACTLY ONE best PROJECT-specific image
+- Empty array is OK if no quality PROJECT images found
+- Image must be of the SPECIFIC PROJECT (not generic company images)
+- Each image includes source_url for attribution
