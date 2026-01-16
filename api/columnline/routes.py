@@ -1655,6 +1655,19 @@ def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
         ''
     )
 
+    # Extract resolved_entity from 3_ENTITY_RESEARCH
+    entity_output = step_outputs.get('3_ENTITY_RESEARCH', {})
+    if entity_output:
+        clean = extract_clean_content(entity_output.get('output', {}))
+        if isinstance(clean, dict):
+            resolved_entity = clean.get('resolved_entity', {})
+            if resolved_entity:
+                find_lead['resolved_entity'] = resolved_entity
+                # Ensure company_intel.network_intelligence is properly nested
+                company_intel = resolved_entity.get('company_intel', {})
+                if company_intel:
+                    find_lead['resolved_entity']['company_intel'] = company_intel
+
     return find_lead
 
 
@@ -1693,7 +1706,7 @@ def assemble_enrich_lead(step_outputs: dict) -> dict:
 
 
 def assemble_insight(step_outputs: dict) -> dict:
-    """Assemble insight JSONB from WRITER_STRATEGY output."""
+    """Assemble insight JSONB from WRITER_STRATEGY and 07B_INSIGHT outputs."""
     insight = {
         'the_math': {},
         'deal_strategy': {},
@@ -1702,15 +1715,30 @@ def assemble_insight(step_outputs: dict) -> dict:
         'sources': []
     }
 
-    # From WRITER_STRATEGY (10_WRITER_STRATEGY)
-    strategy_output = step_outputs.get('10_WRITER_STRATEGY', {})
-    if strategy_output:
-        clean = extract_clean_content(strategy_output.get('output', {}))
+    # First try from 07B_INSIGHT (raw insight data)
+    insight_output = step_outputs.get('07B_INSIGHT', {})
+    if insight_output:
+        clean = extract_clean_content(insight_output.get('output', {}))
         if isinstance(clean, dict):
             insight['the_math'] = clean.get('the_math') or {}
             insight['deal_strategy'] = clean.get('deal_strategy') or {}
             insight['competitive_positioning'] = clean.get('competitive_positioning') or {}
             insight['decision_making_process'] = clean.get('decision_making_process') or {}
+
+    # Then try from WRITER_STRATEGY (10_WRITER_STRATEGY) - can override/fill gaps
+    strategy_output = step_outputs.get('10_WRITER_STRATEGY', {})
+    if strategy_output:
+        clean = extract_clean_content(strategy_output.get('output', {}))
+        if isinstance(clean, dict):
+            # Only override if we have better data
+            if clean.get('the_math'):
+                insight['the_math'] = clean['the_math']
+            if clean.get('deal_strategy'):
+                insight['deal_strategy'] = clean['deal_strategy']
+            if clean.get('competitive_positioning'):
+                insight['competitive_positioning'] = clean['competitive_positioning']
+            if clean.get('decision_making_process'):
+                insight['decision_making_process'] = clean['decision_making_process']
 
     # Collect sources from all steps
     sources = []
@@ -1742,7 +1770,29 @@ def assemble_copy(step_outputs: dict, contact_id_map: dict) -> dict:
     if strategy_output:
         clean = extract_clean_content(strategy_output.get('output', {}))
         if isinstance(clean, dict):
-            copy_data['objections'] = clean.get('objections') or []
+            # Transform objections - response may be object or string
+            raw_objections = clean.get('objections') or []
+            transformed_objections = []
+            for obj in raw_objections:
+                if isinstance(obj, dict):
+                    response = obj.get('response', '')
+                    # If response is an object, concatenate its parts into a string
+                    if isinstance(response, dict):
+                        parts = []
+                        if response.get('acknowledge'):
+                            parts.append(response['acknowledge'])
+                        if response.get('reframe'):
+                            parts.append(response['reframe'])
+                        if response.get('evidence'):
+                            parts.append(response['evidence'])
+                        if response.get('close'):
+                            parts.append(response['close'])
+                        response = ' '.join(parts)
+                    transformed_objections.append({
+                        'objection': obj.get('objection', ''),
+                        'response': response
+                    })
+            copy_data['objections'] = transformed_objections
             copy_data['conversation_starters'] = clean.get('conversation_starters') or []
 
     # Outreach is built per-contact during contact insertion
@@ -2087,14 +2137,14 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
 
         contact_data = {
             'dossier_id': production_dossier_id,
-            'name': contact_name,
-            'first_name': first_name,
-            'last_name': last_name,
-            'title': contact.get('title') or contact.get('role'),
-            'email': email,
-            'phone': phone,
-            'linkedin_url': linkedin_url,
-            'bio_paragraph': bio_paragraph,
+            'name': contact_name or 'Unknown Contact',
+            'first_name': first_name or '',
+            'last_name': last_name or '',
+            'title': contact.get('title') or contact.get('role') or '',
+            'email': email or '',
+            'phone': phone or '',
+            'linkedin_url': linkedin_url or '',
+            'bio_paragraph': bio_paragraph or '',
             'is_primary': idx == 0,  # First contact is primary
             'source': 'v2_pipeline',
             'created_at': datetime.now().isoformat()
