@@ -1644,6 +1644,18 @@ def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
         clean = extract_clean_content(opp_output.get('output', {}))
         if isinstance(clean, dict):
             find_lead['company_snapshot'] = clean.get('company_snapshot') or {}
+            # NEW: opportunity_intelligence for UI section
+            if clean.get('opportunity_intelligence'):
+                find_lead['opportunity_intelligence'] = clean['opportunity_intelligence']
+
+    # From WRITER_CLIENT_SPECIFIC (10_WRITER_CLIENT_SPECIFIC)
+    client_specific_output = step_outputs.get('10_WRITER_CLIENT_SPECIFIC', {})
+    if client_specific_output:
+        clean = extract_clean_content(client_specific_output.get('output', {}))
+        if isinstance(clean, dict):
+            # NEW: custom_research for UI section (golfers, alumni, associations, etc.)
+            if clean.get('custom_research'):
+                find_lead['custom_research'] = clean['custom_research']
 
     # Get company_name - prefer company_snapshot, fall back to seed_data
     company_snapshot = find_lead.get('company_snapshot', {})
@@ -1701,6 +1713,22 @@ def assemble_enrich_lead(step_outputs: dict) -> dict:
         clean = extract_clean_content(signals_output.get('output', {}))
         if isinstance(clean, dict):
             enrich_lead['additional_signals'] = clean.get('additional_signals') or []
+
+    # From WRITER_OPPORTUNITY (10_WRITER_OPPORTUNITY) - opportunity_details
+    opp_output = step_outputs.get('10_WRITER_OPPORTUNITY', {})
+    if opp_output:
+        clean = extract_clean_content(opp_output.get('output', {}))
+        if isinstance(clean, dict):
+            if clean.get('opportunity_details'):
+                enrich_lead['opportunity_details'] = clean['opportunity_details']
+
+    # From WRITER_CLIENT_SPECIFIC (10_WRITER_CLIENT_SPECIFIC) - client_specific
+    client_specific_output = step_outputs.get('10_WRITER_CLIENT_SPECIFIC', {})
+    if client_specific_output:
+        clean = extract_clean_content(client_specific_output.get('output', {}))
+        if isinstance(clean, dict):
+            if clean.get('client_specific'):
+                enrich_lead['client_specific'] = clean['client_specific']
 
     return enrich_lead
 

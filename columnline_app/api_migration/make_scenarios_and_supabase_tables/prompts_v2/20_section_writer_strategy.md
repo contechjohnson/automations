@@ -204,7 +204,9 @@ From INSIGHT claims:
 
 ### Output Format
 
-Return valid JSON with fields for both `insight` and `copy` columns:
+Return valid JSON with fields for both `insight` and `copy` columns.
+
+**IMPORTANT:** Include BOTH V1-compatible fields (for existing frontend) AND V2 rich fields (for future UI enhancements).
 
 **For `insight` column:** `the_math`, `deal_strategy`, `competitive_positioning`, `decision_making_process`
 **For `copy` column:** `objections`, `conversation_starters`
@@ -218,6 +220,12 @@ Return valid JSON with fields for both `insight` and `copy` columns:
     "bottom_line": "One-sentence summary of the win scenario"
   },
   "deal_strategy": {
+    "how_they_buy": "EPCM-led vendor evaluation with [Company] final approval. Deliberate process preferring proven vendors over aggressive bids. Key criteria: safety record, remote-site experience, community relationships, then price.",
+    "unique_value_props": [
+      "Only contractor with proven ice road logistics expertise AND specialized winter construction equipment",
+      "8-week average schedule acceleration vs industry standard on remote mine projects",
+      "Zero lost-time incidents across 200,000+ remote-site labor hours"
+    ],
     "win_probability": 71,
     "probability_breakdown": {
       "fit_score": {
@@ -315,12 +323,61 @@ Return valid JSON with fields for both `insight` and `copy` columns:
     "Connection point based on shared background or mutual contact"
   ],
   "decision_making_process": {
-    "key_decision_makers": ["Role 1", "Role 2"],
-    "typical_timeline": "Description of how long decisions take",
-    "procurement_approach": "RFP, negotiated, EPCM-led, etc.",
-    "budget_authority": "Who controls budget, approval levels"
+    "company_type": "Private equity-backed mining development company",
+    "organizational_structure": "Centralized decision-making with EPCM partner involvement in vendor evaluation",
+    "key_roles": [
+      {
+        "role": "COO/VP Projects",
+        "name": "[Contact Name]",
+        "influence": "Primary decision-maker for project execution vendors"
+      },
+      {
+        "role": "CEO",
+        "name": "Luca Giacovazzi",
+        "influence": "Final approval on major contracts over $10M"
+      },
+      {
+        "role": "EPCM Project Director",
+        "name": "[Target Contact]",
+        "influence": "Technical evaluator, strong recommendation power"
+      }
+    ],
+    "typical_process": "EPCM-led vendor qualification → shortlist recommendation → COO evaluation → CEO approval for major contracts",
+    "entry_points": [
+      "EPCM Project Director - technical credibility path",
+      "COO via warm introduction - decision-maker direct access",
+      "Industry conference networking - relationship building"
+    ],
+    "key_decision_makers": ["COO/VP Projects", "CEO", "EPCM Project Director"],
+    "typical_timeline": "3-6 months from initial engagement to contract award for major vendors",
+    "procurement_approach": "EPCM-led vendor evaluation with owner final approval",
+    "budget_authority": "CFO controls budget, CEO approves contracts over $10M"
   },
   "competitive_positioning": {
+    "insights_they_dont_know": [
+      {
+        "insight": "Their current preferred vendor has 3x higher failure rates on remote winter projects",
+        "advantage": "Our specialized equipment and logistics prevent the weather-related delays that plagued their competitor's projects"
+      },
+      {
+        "insight": "EPCM firm [Partner Firm] has worked with us on 3 previous remote projects and will recommend us",
+        "advantage": "Existing relationship with their engineering partner gives us inside track if we engage early"
+      },
+      {
+        "insight": "Q2 2026 construction start means vendor decisions must happen Q4 2025 - competitors don't know this timeline",
+        "advantage": "Early engagement now positions us before RFP formalization"
+      }
+    ],
+    "landmines_to_avoid": [
+      {
+        "topic": "Previous vendor relationship with [Incumbent Company]",
+        "reason": "COO has personal relationship with [Incumbent] leadership - don't criticize them directly"
+      },
+      {
+        "topic": "Cost comparison discussions",
+        "reason": "CFO is budget-focused - always frame premium as investment with ROI, not as higher cost"
+      }
+    ],
     "the_angle": "The only contractor with proven ice road [industry] expertise AND specialized winter construction equipment for remote northern mines.",
     "the_why_now": "Vendor selection happening Q4 2025 - Q1 2026 as EPCM moves into detailed engineering. Early engagement prevents incumbent lock-in and allows technical input during design phase. Q2 2026 construction start requires vendor decisions NOW.",
     "the_proof": {
@@ -381,14 +438,44 @@ Return valid JSON with fields for both `insight` and `copy` columns:
 ## Variables Produced
 
 Fields added to `insight` JSONB column:
-- `the_math` - Summary of situation, opportunity, translation, bottom line
-- `deal_strategy` - Win probability, competitive landscape, success factors, risks
-- `competitive_positioning` - The angle, why now, proof, differentiation strategy
-- `decision_making_process` - Key decision makers, timeline, procurement approach
+
+**the_math (V1 + V2):**
+- `their_reality` - Current situation summary
+- `the_opportunity` - Value proposition for client
+- `translation` - Plain language sales approach
+- `bottom_line` - One-sentence win scenario
+
+**deal_strategy (V1 + V2 fields):**
+- `how_they_buy` - V1 compat: String describing procurement process
+- `unique_value_props[]` - V1 compat: Array of differentiator strings
+- `win_probability` - V2: Calculated win percentage
+- `probability_breakdown` - V2: Detailed fit/competitive/relationship scores
+- `competitive_landscape` - V2: Detailed competitor analysis
+- `critical_success_factors` - V2: Array of must-haves to win
+- `deal_breaking_risks` - V2: Array of risks with mitigations
+
+**competitive_positioning (V1 + V2 fields):**
+- `insights_they_dont_know[]` - V1 compat: Array of {insight, advantage}
+- `landmines_to_avoid[]` - V1 compat: Array of {topic, reason}
+- `the_angle` - V2: One-sentence positioning hook
+- `the_why_now` - V2: Urgency explanation
+- `the_proof` - V2: Case studies, results, references
+- `differentiation_strategy` - V2: Strategic positioning narrative
+
+**decision_making_process (V1 + V2 fields):**
+- `company_type` - V1 compat: Type of organization
+- `organizational_structure` - V1 compat: How decisions flow
+- `key_roles[]` - V1 compat: Array of {role, name, influence}
+- `typical_process` - V1 compat: Decision flow description
+- `entry_points[]` - V1 compat: Array of access paths
+- `key_decision_makers` - V2: Array of role strings
+- `typical_timeline` - V2: Decision timing
+- `procurement_approach` - V2: Procurement method
+- `budget_authority` - V2: Who controls budget
 
 Fields added to `copy` JSONB column:
-- `objections` - Array of objection-response pairs
-- `conversation_starters` - Array of conversation opener suggestions
+- `objections[]` - Array of {category, objection, response} where response has {acknowledge, reframe, evidence, close}
+- `conversation_starters[]` - Array of opener strings
 
 ---
 

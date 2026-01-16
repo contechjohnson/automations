@@ -181,12 +181,21 @@ For each connection, note:
 
 ### Output Format
 
-Return valid JSON for `enrich_lead` column:
+Return valid JSON for `enrich_lead` column.
+
+**IMPORTANT:** Include BOTH V1-compatible fields (for existing frontend) AND V2 rich fields (for future UI enhancements).
 
 ```json
 {
   "company_deep_dive": {
+    "description": "[Company Name] is a privately-held Canadian [industry from ICP] investment and development company focused on strategic metals. Headquartered in [Location]. [Brief 2-3 sentence overview]",
     "company_overview": "[Company Name] is a privately-held Canadian [industry from ICP] investment and development company focused on strategic metals (nickel, copper, cobalt). Headquartered in Perth, Australia with Canadian operations based in [Location], [Geography]. Acquired [Project Name] project from [Company] Resources in 2022 for $435M. Backed by billionaire Andrew [Owner]'s private investment vehicle.",
+    "employees": "250-500",
+    "revenue": "$500M+ (estimated)",
+    "founded_year": "2018",
+    "mainline_phones": ["+1-416-555-0100"],
+    "general_emails": ["info@company.com"],
+    "coordinates": {"lat": 43.6532, "lng": -79.3832},
     "financial_profile": {
       "ownership": "Private (Andrew [Owner] / Tattarang)",
       "revenue": "Not publicly disclosed",
@@ -222,6 +231,14 @@ Return valid JSON for `enrich_lead` column:
     }
   },
   "network_intelligence": {
+    "warm_paths": [
+      {
+        "name": "[Mutual Contact Name]",
+        "title": "Former Project Director at [Partner Firm]",
+        "approach": "Email introduction to [Target Contact], mentioning client's remote-site work",
+        "linkedin_url": "https://linkedin.com/in/mutualcontact"
+      }
+    ],
     "warm_intro_paths": [
       {
         "type": "direct",
@@ -229,6 +246,45 @@ Return valid JSON for `enrich_lead` column:
         "strength": "strong",
         "approach": "Email introduction from John to Jennifer, mentioning client's remote-site work",
         "timing": "Activate within 2 weeks (before other vendors establish relationships)"
+      }
+    ],
+    "upcoming_opportunities": [
+      {
+        "date": "Q4 2025",
+        "opportunity": "Vendor selection for civil works and steel erection",
+        "relevance": "Perfect timing for introduction before formal RFP process"
+      },
+      {
+        "date": "Q2 2026",
+        "opportunity": "Construction phase kickoff",
+        "relevance": "Client's remote-site expertise highly relevant"
+      }
+    ],
+    "associations": [
+      {
+        "name": "[Geography] Mining Association",
+        "source_url": "https://example.com/membership",
+        "context": "Active member, Infrastructure Committee"
+      }
+    ],
+    "partnerships": [
+      {
+        "name": "[Partner Firm] (EPCM)",
+        "source_url": "https://example.com/press-release",
+        "context": "Awarded $50M EPCM contract July 2025"
+      }
+    ],
+    "conferences": [
+      {
+        "name": "PDAC 2025",
+        "source_url": "https://example.com/exhibitors",
+        "context": "Exhibited at global mining conference"
+      }
+    ],
+    "awards": [
+      {
+        "name": "Environmental Excellence Award 2024",
+        "source_url": "https://example.com/awards"
       }
     ],
     "alumni_networks": [
@@ -283,8 +339,34 @@ Return valid JSON for `enrich_lead` column:
 ## Variables Produced
 
 Fields added to `enrich_lead` JSONB column:
-- `company_deep_dive` - Object with company profile, financials, leadership, competitive landscape, recent moves, buying patterns
-- `network_intelligence` - Object with warm intro paths, alumni networks, professional overlaps, relationship leverage strategy
+
+**company_deep_dive (V1 + V2 fields):**
+- `description` - V1 compat: Brief 2-3 sentence company overview
+- `employees` - V1 compat: Estimated employee count
+- `revenue` - V1 compat: Revenue estimate
+- `founded_year` - V1 compat: Year founded
+- `mainline_phones` - V1 compat: Main phone numbers
+- `general_emails` - V1 compat: General contact emails
+- `coordinates` - V1 compat: HQ lat/lng
+- `company_overview` - V2: Rich detailed company overview paragraph
+- `financial_profile` - V2: Detailed financial data object
+- `leadership` - V2: Leadership details object
+- `competitive_landscape` - V2: Competitive analysis object
+- `recent_moves` - V2: Array of recent strategic moves
+- `how_they_buy` - V2: Procurement patterns object
+
+**network_intelligence (V1 + V2 fields):**
+- `warm_paths[]` - V1 compat: Array of {name, title, approach, linkedin_url}
+- `upcoming_opportunities[]` - V1 compat: Array of {date, opportunity, relevance}
+- `associations[]` - V1 compat: Array of {name, source_url, context}
+- `partnerships[]` - V1 compat: Array of {name, source_url, context}
+- `conferences[]` - V1 compat: Array of {name, source_url, context}
+- `awards[]` - V1 compat: Array of {name, source_url}
+- `warm_intro_paths[]` - V2: Rich warm intro analysis
+- `alumni_networks[]` - V2: Alumni connection details
+- `professional_overlaps[]` - V2: Professional network overlaps
+- `golf_connections[]` - V2: Recreational connections
+- `relationship_leverage_strategy` - V2: Strategy narrative
 
 ---
 

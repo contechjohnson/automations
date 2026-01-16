@@ -117,7 +117,11 @@ Adjust outreach based on relationships:
 
 ### Output Format
 
-Return research narrative with sources:
+Return BOTH:
+1. A **research narrative** (for human review)
+2. A **structured JSON object** at the end (for frontend rendering)
+
+**Narrative Sections:**
 
 ```
 ## WARM INTRODUCTION PATHS
@@ -168,6 +172,76 @@ Return research narrative with sources:
 [Client notes referenced, LinkedIn profiles checked, any external sources]
 ```
 
+---
+
+## STRUCTURED OUTPUT (Required)
+
+After the narrative, include a JSON code block with `custom_research` matching any client-specific criteria found:
+
+```json
+{
+  "custom_research": {
+    "title": "Client-Specific Research",
+    "items": [
+      {
+        "criteria_name": "Active Golfers",
+        "matches": [
+          {
+            "contact_name": "John Smith",
+            "evidence": "Member of Colorado Golf Association, 8.2 handicap, plays Arrowhead GC regularly",
+            "source": "https://cga.org/profile/123"
+          },
+          {
+            "contact_name": "Sarah Johnson",
+            "evidence": "Posts about golf on LinkedIn, recent Pebble Beach trip photos",
+            "source": "https://linkedin.com/in/sarahjohnson"
+          }
+        ]
+      },
+      {
+        "criteria_name": "University of Illinois Alumni",
+        "matches": [
+          {
+            "contact_name": "Mike Chen",
+            "evidence": "BS Civil Engineering, U of I 2005. Active in Chicago Illini Club.",
+            "source": "https://linkedin.com/in/mikechen"
+          }
+        ]
+      },
+      {
+        "criteria_name": "Women in Construction Network",
+        "matches": [
+          {
+            "contact_name": "Lisa Martinez",
+            "evidence": "Board member of NAWIC Dallas chapter, speaker at 2024 WIC Summit",
+            "source": "https://nawic.org/chapters/dallas"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Custom Research Criteria Types (examples):**
+- Golf connections (club memberships, handicaps, courses played)
+- Alumni networks (shared universities, Greek life, athletics)
+- Military/veterans (branch, service dates, veteran organizations)
+- Professional associations (NAWIC, SMPS, AGC memberships)
+- Geographic roots (hometown connections, where they started career)
+- Past employer overlaps (people who worked at both companies)
+- Board/nonprofit involvement (charity boards, advisory roles)
+- Hobbies/interests (pilots, marathoners, etc.)
+
+**Only include criteria that have actual matches.** If no golfers found, don't include "Active Golfers" with empty matches.
+
+**If NO client-specific criteria matches found:**
+```json
+{
+  "custom_research": null
+}
+```
+
 ### Constraints
 
 **Do:**
@@ -196,6 +270,14 @@ Return research narrative with sources:
 ## Variables Produced
 
 - `research_narrative` - Client-specific relationship intelligence (gets extracted to claims)
+- `custom_research` - **UI-ready** structured JSON for Custom Research section:
+  - `title` - Section title (e.g., "Client-Specific Research")
+  - `items[]` - Array of criteria matches, each with:
+    - `criteria_name` - e.g., "Active Golfers", "U of I Alumni", "Women in Construction"
+    - `matches[]` - Array of contacts matching this criteria, each with:
+      - `contact_name` - Name of matching contact
+      - `evidence` - How we know (e.g., "Member of CGA, 8.2 handicap")
+      - `source` - URL source (optional)
 
 ---
 

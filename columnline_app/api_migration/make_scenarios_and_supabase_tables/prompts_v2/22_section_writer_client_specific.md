@@ -129,10 +129,52 @@ How relationships create unique positioning:
 
 ### Output Format
 
-Return valid JSON for `enrich_lead` column:
+Return valid JSON for `enrich_lead` and `find_leads` columns:
+
+**IMPORTANT:** Include `custom_research` if there are ANY client-specific criteria matches (golfers, alumni, associations, etc.). This is a flexible container - populate with whatever criteria the client specified.
 
 ```json
 {
+  "custom_research": {
+    "title": "Client-Specific Research",
+    "items": [
+      {
+        "criteria_name": "Active Golfers",
+        "matches": [
+          {
+            "contact_name": "Jennifer Williams",
+            "evidence": "Member of Toronto Golf Club, posts about golf on LinkedIn, 2023 PDAC golf tournament participant",
+            "source": "https://linkedin.com/in/jenniferwilliams"
+          }
+        ]
+      },
+      {
+        "criteria_name": "University of Toronto Alumni",
+        "matches": [
+          {
+            "contact_name": "Michael Chen",
+            "evidence": "BASc Mining Engineering 2008, active in UofT Engineering Alumni Network",
+            "source": "https://linkedin.com/in/michaelchen"
+          },
+          {
+            "contact_name": "Sarah Thompson",
+            "evidence": "MBA Rotman 2015, UofT Engineering undergrad 2010",
+            "source": "https://linkedin.com/in/sarahthompson"
+          }
+        ]
+      },
+      {
+        "criteria_name": "OMA Infrastructure Committee",
+        "matches": [
+          {
+            "contact_name": "David Martinez",
+            "evidence": "Committee co-chair 2024-present, presented at Q3 2025 meeting on Ring of Fire logistics",
+            "source": "https://oma.on.ca/committees"
+          }
+        ]
+      }
+    ]
+  },
   "client_specific": {
     "relationship_intelligence": {
       "warm_intro_paths": [
@@ -261,6 +303,16 @@ Return valid JSON for `enrich_lead` column:
 ---
 
 ## Variables Produced
+
+Fields added to `find_leads` JSONB column:
+- `custom_research` - **UI-ready** structured JSON for Custom Research section:
+  - `title` - Section title (e.g., "Client-Specific Research")
+  - `items[]` - Array of criteria matches, each with:
+    - `criteria_name` - e.g., "Active Golfers", "U of I Alumni", "Women in Construction"
+    - `matches[]` - Array of contacts matching this criteria, each with:
+      - `contact_name` - Name of matching contact
+      - `evidence` - How we know (e.g., "Member of CGA, 8.2 handicap")
+      - `source` - URL source (optional)
 
 Fields added to `enrich_lead` JSONB column:
 - `client_specific` - Object with relationship intelligence, insider knowledge, custom positioning, approach strategy

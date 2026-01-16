@@ -148,12 +148,30 @@ Combine all categories into structured section with narrative flow.
 
 ### Output Format
 
-Return valid JSON with two root-level objects:
+Return valid JSON with these root-level objects:
 - `company_snapshot` → Goes to `find_lead` column
 - `project_sites` → Goes to `enrich_lead` column
+- `opportunity_intelligence` → **UI-ready summary** for Opportunity Intelligence section (REQUIRED)
+- `opportunity_details` → Detailed project intelligence (existing)
+
+**IMPORTANT:** `opportunity_intelligence` is a concise, UI-ready summary of the opportunity. It should be dynamic based on what the signal/project is about - construction, funding, expansion, acquisition, etc.
 
 ```json
 {
+  "opportunity_intelligence": {
+    "headline": "$1.2B Underground Nickel-Copper Mine Development",
+    "opportunity_type": "Capital Project",
+    "timeline": "Q2 2026 construction start, 2028 first production",
+    "budget_range": "$40-60M client scope (civil + steel)",
+    "key_details": [
+      "540km northeast of Thunder Bay, Ring of Fire region",
+      "2,000 tpd processing plant, 100km all-season access road",
+      "Remote-site construction accessible via ice road (winter)",
+      "EPCM awarded to Hatch, civil/steel vendors still being selected",
+      "First Nations workforce integration requirement"
+    ],
+    "why_it_matters": "Perfect fit for client's remote-site specialization. No incumbent vendor relationships. Schedule-driven decision criteria favors client's rapid mobilization capability."
+  },
   "company_snapshot": {
     "company_name": "[Company Name]",
     "description": "Short description of what the company does (1-2 sentences)",
@@ -348,6 +366,13 @@ Return valid JSON with two root-level objects:
 
 Fields added to `find_lead` JSONB column:
 - `company_snapshot` - Object with company name, description, domain, HQ location, industry
+- `opportunity_intelligence` - **UI-ready** concise opportunity summary:
+  - `headline` - Punchy opportunity headline (e.g., "$1.2B Underground Mine Development")
+  - `opportunity_type` - Type (Capital Project, Expansion, Funding Round, Acquisition, etc.)
+  - `timeline` - Key dates/phases
+  - `budget_range` - Budget or client scope estimate
+  - `key_details[]` - 3-5 bullet points about the opportunity
+  - `why_it_matters` - Why this matters for the client specifically
 
 Fields added to `enrich_lead` JSONB column:
 - `project_sites` - Array of project site objects with name, address, scope, status

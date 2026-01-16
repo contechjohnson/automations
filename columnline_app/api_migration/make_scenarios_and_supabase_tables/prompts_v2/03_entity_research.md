@@ -158,7 +158,11 @@ Prioritize:
 
 ### Output Format
 
-Return a **research narrative** (not structured claims - claims extraction happens separately).
+Return BOTH:
+1. A **research narrative** (for human review and claims extraction)
+2. A **structured JSON object** at the end (for frontend rendering)
+
+**IMPORTANT:** The structured JSON must include V1-compatible fields for the frontend. Place the JSON in a code block at the very end of your response.
 
 Structure your narrative in these sections:
 
@@ -393,9 +397,123 @@ Source: [Source citation]
 
 ---
 
+## STRUCTURED OUTPUT (Required)
+
+After the narrative, include a JSON code block with this exact structure:
+
+```json
+{
+  "resolved_entity": {
+    "company_name": "[Legal company name]",
+    "primary_domain": "[company.com]",
+    "email_domain": "[company.com or alternate]",
+    "company_intel": {
+      "headquarters": "[City, State/Country]",
+      "description": "[2-3 sentence company overview]",
+      "employees": "[Employee count or range]",
+      "revenue": "[Revenue if known]",
+      "founded_year": "[Year]",
+      "notable_projects": [
+        {
+          "name": "[Project Name]",
+          "location": "[Location]",
+          "status": "[Planning/Construction/Completed]",
+          "budget": "[Budget estimate if known]"
+        }
+      ],
+      "leadership": [
+        {
+          "name": "[Executive Name]",
+          "title": "[Title]",
+          "linkedin_url": "[URL if found]"
+        }
+      ],
+      "network_intelligence": {
+        "associations": [
+          {
+            "name": "[Industry Association Name]",
+            "source_url": "[URL where discovered]",
+            "context": "[Membership type or involvement]"
+          }
+        ],
+        "partnerships": [
+          {
+            "name": "[Partner Company Name]",
+            "source_url": "[URL where discovered]",
+            "context": "[Nature of partnership - EPCM, JV, supplier, etc.]"
+          }
+        ],
+        "conferences": [
+          {
+            "name": "[Conference Name]",
+            "source_url": "[URL where discovered]",
+            "context": "[Attendee, speaker, sponsor, exhibitor]"
+          }
+        ],
+        "awards": [
+          {
+            "name": "[Award Name]",
+            "source_url": "[URL where discovered]"
+          }
+        ]
+      }
+    }
+  },
+  "opportunity_intelligence": {
+    "headline": "[Concise opportunity headline - e.g., '$4.2M Healthcare Wing Expansion' or 'New 500MW Data Center Campus']",
+    "opportunity_type": "[Capital Project / Growth Initiative / Expansion / New Construction / Renovation / Infrastructure]",
+    "timeline": "[Key timeline - e.g., 'Q2 2026 construction start' or 'Permitting phase, 18-month build']",
+    "budget_range": "[Budget range - e.g., '$3.5M - $5M' or '$50M+']",
+    "key_details": [
+      "[Specific detail about the project scope]",
+      "[Technical requirements or specifications]",
+      "[Procurement opportunities for client]",
+      "[Key milestones or phases]"
+    ],
+    "why_it_matters": "[Connection to client's value prop - why this specific opportunity is relevant to what they do]"
+  },
+  "opportunity": {
+    "project_name": "[Project Name]",
+    "project_type": "[Type from ICP]",
+    "location": "[Full location]",
+    "coordinates": {"lat": 0.0, "lng": 0.0},
+    "construction_start": "[Date]",
+    "completion_date": "[Date]",
+    "budget_estimate": "[Budget]",
+    "procurement_status": {
+      "epcm": "[Firm name or 'Not awarded']",
+      "general_contractor": "[Firm name or 'Not awarded']",
+      "open_opportunities": ["[Scope area 1]", "[Scope area 2]"]
+    }
+  },
+  "icp_fit": {
+    "signal_strength": "[HOT/WARM/PASSIVE]",
+    "signal_points": 0,
+    "timeline_fit": "[GOOD/MARGINAL/POOR]",
+    "timeline_points": 0,
+    "geography_tier": "[TIER_1/TIER_2/TIER_3]",
+    "geography_points": 0,
+    "overall_assessment": "[STRONG_FIT/MODERATE_FIT/WEAK_FIT/DISQUALIFIED]",
+    "recommendation": "[PURSUE/MONITOR/PASS]"
+  }
+}
+```
+
+---
+
 ## Variables Produced
 
 - `research_narrative` - Comprehensive report in markdown format
+- `resolved_entity` - Structured JSON with company identity, intel, and network intelligence
+- `opportunity_intelligence` - **UI-ready** deep dive on the actual opportunity/signal/project:
+  - `headline` - Concise opportunity headline (e.g., "$4.2M Healthcare Wing Expansion")
+  - `opportunity_type` - Type classification (Capital Project, Growth Initiative, etc.)
+  - `timeline` - Key timeline info (e.g., "Q2 2026 construction start")
+  - `budget_range` - Budget range (e.g., "$3.5M - $5M")
+  - `key_details[]` - Array of specific project details, specs, procurement opportunities
+  - `why_it_matters` - Connection to client's value prop
+- `opportunity` - Structured JSON with full project details (internal use)
+- `icp_fit` - Structured JSON with fit assessment
 - Claims will be extracted separately via claims extraction step
 
 ---
