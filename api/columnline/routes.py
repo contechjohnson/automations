@@ -1992,7 +1992,60 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
     # Generate production dossier ID
     production_dossier_id = str(uuid.uuid4())
 
-    # Insert each contact into production contacts table
+    # 8. Assemble initial copy data (without contact IDs - will update after contacts inserted)
+    copy_data = assemble_copy(step_outputs, contact_id_map)
+
+    # 9. Determine release timing
+    released_at = None
+    release_date = request.release_date
+    if not release_date:
+        # Immediate release
+        released_at = datetime.now().isoformat()
+
+    # 10. Get company info for dossier
+    company_name = (
+        seed_data.get('company_name') or
+        seed_data.get('name') or
+        seed_data.get('company') or
+        find_lead.get('company_name') or
+        find_lead.get('company_snapshot', {}).get('name') or
+        # Try to extract from contacts
+        (contacts_list[0].get('company') if contacts_list else None) or
+        f"Dossier_{run_id}"  # Last resort fallback
+    )
+    company_domain = (
+        seed_data.get('domain') or
+        seed_data.get('company_domain') or
+        find_lead.get('company_snapshot', {}).get('domain')
+    )
+
+    # 11. INSERT DOSSIER FIRST (before contacts, to satisfy FK constraint)
+    dossier_data = {
+        'id': production_dossier_id,
+        'client_id': production_client_id,
+        'batch_id': batch['id'],
+        'company_name': company_name,
+        'company_domain': company_domain,
+        'find_leads': find_lead,  # Note: column is 'find_leads' with 's'
+        'enrich_lead': enrich_lead,
+        'copy': copy_data,  # Initial copy without outreach - will update after contacts
+        'insight': insight_data,
+        'media': media_data,
+        'lead_score': find_lead.get('lead_score', 0),
+        'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
+        'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
+        'status': 'ready',
+        'pipeline_version': 'v2',
+        'agents_completed': ['find-lead', 'enrich-contacts', 'enrich-lead', 'write-copy', 'insight', 'enrich-media'],
+        'release_date': release_date,
+        'released_at': released_at,
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+
+    repo.client.table('dossiers').insert(dossier_data).execute()
+
+    # 12. NOW insert contacts (dossier exists, FK constraint satisfied)
     outreach_list = []
     for idx, contact in enumerate(contacts_list):
         if not isinstance(contact, dict):
@@ -2058,59 +2111,10 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
         except Exception as e:
             print(f"Warning: Failed to insert contact {contact_name}: {e}")
 
-    # 8. Assemble copy with contact IDs
-    copy_data = assemble_copy(step_outputs, contact_id_map)
-    copy_data['outreach'] = outreach_list
-
-    # 9. Determine release timing
-    released_at = None
-    release_date = request.release_date
-    if not release_date:
-        # Immediate release
-        released_at = datetime.now().isoformat()
-
-    # 10. Insert dossier into production table
-    # Get company_name from multiple sources (required field, can't be empty)
-    company_name = (
-        seed_data.get('company_name') or
-        seed_data.get('name') or
-        seed_data.get('company') or
-        find_lead.get('company_name') or
-        find_lead.get('company_snapshot', {}).get('name') or
-        # Try to extract from contacts
-        (contacts_list[0].get('company') if contacts_list else None) or
-        f"Dossier_{run_id}"  # Last resort fallback
-    )
-    company_domain = (
-        seed_data.get('domain') or
-        seed_data.get('company_domain') or
-        find_lead.get('company_snapshot', {}).get('domain')
-    )
-
-    dossier_data = {
-        'id': production_dossier_id,
-        'client_id': production_client_id,
-        'batch_id': batch['id'],
-        'company_name': company_name,
-        'company_domain': company_domain,
-        'find_leads': find_lead,  # Note: column is 'find_leads' with 's'
-        'enrich_lead': enrich_lead,
-        'copy': copy_data,
-        'insight': insight_data,
-        'media': media_data,
-        'lead_score': find_lead.get('lead_score', 0),
-        'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
-        'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
-        'status': 'ready',
-        'pipeline_version': 'v2',
-        'agents_completed': ['find-lead', 'enrich-contacts', 'enrich-lead', 'write-copy', 'insight', 'enrich-media'],
-        'release_date': release_date,
-        'released_at': released_at,
-        'created_at': datetime.now().isoformat(),
-        'updated_at': datetime.now().isoformat()
-    }
-
-    repo.client.table('dossiers').insert(dossier_data).execute()
+    # 13. Update dossier's copy field with outreach list (now that contacts exist with IDs)
+    if outreach_list:
+        copy_data['outreach'] = outreach_list
+        repo.client.table('dossiers').update({'copy': copy_data}).eq('id', production_dossier_id).execute()
 
     # 11. Update batch counts
     repo.client.table('batches').update({
