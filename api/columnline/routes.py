@@ -1994,7 +1994,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     contact_id_map = {}
     contacts_created = 0
 
-    # Get contacts from 6_ENRICH_CONTACTS output
+    # Get contacts from 6_ENRICH_CONTACTS output (base list with why_they_matter, role_in_project)
     contacts_step = step_outputs.get('6_ENRICH_CONTACTS', {})
     contacts_list = []
     if contacts_step:
@@ -2003,6 +2003,21 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             contacts_list = clean.get('contacts', clean.get('enriched_contacts', clean.get('key_contacts', [])))
         elif isinstance(clean, list):
             contacts_list = clean
+
+    # Get individual contact enrichments (email, linkedin, signal_relevance, etc.)
+    # Query directly since multiple steps share the same step_name
+    individual_enrichments = {}
+    individual_steps = repo.client.table('v2_pipeline_steps').select('output').eq(
+        'run_id', run_id
+    ).eq('step_name', '6_ENRICH_CONTACT_INDIVIDUAL').eq('status', 'completed').execute()
+
+    for step in individual_steps.data:
+        enrichment = extract_clean_content(step.get('output', {}))
+        if isinstance(enrichment, dict):
+            contact_name = (enrichment.get('FIRST_NAME', '') + ' ' + enrichment.get('LAST_NAME', '')).strip()
+            if contact_name:
+                individual_enrichments[contact_name.lower()] = enrichment
+                print(f"  Found enrichment for: {contact_name}")
 
     # Generate production dossier ID
     production_dossier_id = str(uuid.uuid4())
@@ -2092,20 +2107,62 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         if not contact_name:
             contact_name = 'Unknown Contact'
 
+        # Look up individual enrichment data by name
+        enrichment = individual_enrichments.get(contact_name.lower(), {})
+
+        # Merge base contact data with individual enrichment
+        first_name = enrichment.get('FIRST_NAME') or contact.get('first_name') or contact_name.split()[0] if contact_name else ''
+        last_name = enrichment.get('LAST_NAME') or contact.get('last_name') or (contact_name.split()[-1] if len(contact_name.split()) > 1 else '')
+        email = enrichment.get('EMAIL') or contact.get('email')
+        linkedin_url = enrichment.get('LINKEDIN_URL') or contact.get('linkedin_url') or contact.get('linkedin')
+
+        # Build rich bio from multiple sources
+        bio_parts = []
+        if contact.get('why_they_matter'):
+            bio_parts.append(contact['why_they_matter'])
+        if enrichment.get('LINKEDIN_SUMMARY'):
+            bio_parts.append(enrichment['LINKEDIN_SUMMARY'])
+        if enrichment.get('WEB_SUMMARY'):
+            bio_parts.append(enrichment['WEB_SUMMARY'])
+        bio_paragraph = ' '.join(bio_parts) if bio_parts else contact.get('bio_paragraph', '')
+
+        # Store ALL enrichment data in JSONB column (nothing lost!)
+        enrichment_data = {
+            # From 6_ENRICH_CONTACTS (base contact info)
+            'role_in_project': contact.get('role_in_project'),
+            'why_they_matter': contact.get('why_they_matter'),
+            'notes': contact.get('notes'),
+            'confidence': contact.get('confidence'),
+            # From 6_ENRICH_CONTACT_INDIVIDUAL (rich enrichment)
+            'signal_relevance': enrichment.get('SIGNAL_RELEVANCE'),
+            'interesting_facts': enrichment.get('INTERESTING_FACTS', []),
+            'linkedin_summary': enrichment.get('LINKEDIN_SUMMARY'),
+            'web_summary': enrichment.get('WEB_SUMMARY'),
+            'email_confidence': enrichment.get('EMAIL_CONFIDENCE'),
+            'email_source': enrichment.get('EMAIL_SOURCE'),
+            'linkedin_source': enrichment.get('LINKEDIN_SOURCE'),
+        }
+        # Remove None values to keep it clean
+        enrichment_data = {k: v for k, v in enrichment_data.items() if v is not None}
+
         contact_data = {
             'dossier_id': production_dossier_id,
             'name': contact_name,
-            'first_name': contact.get('first_name'),
-            'last_name': contact.get('last_name'),
+            'first_name': first_name,
+            'last_name': last_name,
             'title': contact.get('title') or contact.get('role'),
-            'email': contact.get('email'),
+            'email': email,
             'phone': contact.get('phone'),
-            'linkedin_url': contact.get('linkedin_url') or contact.get('linkedin'),
-            'bio_paragraph': contact.get('bio_paragraph') or contact.get('bio') or contact.get('why_they_matter', ''),
+            'linkedin_url': linkedin_url,
+            'bio_paragraph': bio_paragraph,
             'is_primary': idx == 0,  # First contact is primary
-            'source': contact.get('source', 'v2_pipeline'),
+            'source': 'v2_pipeline',
             'created_at': datetime.now().isoformat()
         }
+
+        # Add enrichment_data if the column exists (JSONB with all the rich data)
+        if enrichment_data:
+            contact_data['enrichment_data'] = enrichment_data
 
         # Insert contact
         try:
