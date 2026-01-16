@@ -469,3 +469,35 @@ class OnboardCompleteResponse(BaseModel):
     next_step: Optional[str] = None  # None if done
     configs_generated: Optional[List[str]] = None  # Set on final step
     message: str = "Step completed successfully"
+
+
+# ============================================================================
+# PUBLISH TO PRODUCTION MODELS
+# ============================================================================
+
+class PublishRequest(BaseModel):
+    """Publish a v2 dossier to production tables"""
+    release_date: Optional[str] = Field(
+        default=None,
+        description="Scheduled release date (YYYY-MM-DD). If not provided, releases immediately."
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "release_date": "2026-01-20"
+            }
+        }
+
+
+class PublishResponse(BaseModel):
+    """Response from publishing to production"""
+    success: bool = True
+    run_id: str
+    production_dossier_id: str
+    production_batch_id: str
+    contacts_created: int
+    pipeline_version: str = "v2"
+    released_at: Optional[str] = None
+    release_date: Optional[str] = None
+    message: str = "Dossier published to production successfully"

@@ -32,7 +32,9 @@ from .models import (
     # Onboarding
     OnboardStartRequest, OnboardStartResponse,
     OnboardPrepareRequest, OnboardPrepareResponse,
-    OnboardCompleteRequest, OnboardCompleteResponse
+    OnboardCompleteRequest, OnboardCompleteResponse,
+    # Publish to Production
+    PublishRequest, PublishResponse
 )
 
 router = APIRouter(prefix="/columnline", tags=["columnline"])
@@ -1690,4 +1692,358 @@ async def complete_batch(request: BatchCompleteRequest):
         directions_count=len(direction_objects),
         distribution_achieved=distribution_achieved,
         message=f"Batch completed with {len(direction_objects)} directions"
+    )
+
+
+# ============================================================================
+# PUBLISH TO PRODUCTION ENDPOINTS
+# ============================================================================
+
+def get_or_create_v2_batch(production_client_id: str) -> dict:
+    """
+    Get or create a daily V2 batch for this client.
+    Returns batch record with 'id' field.
+    """
+    from datetime import date
+    today = date.today().strftime('%Y%m%d')
+    batch_number = f"V2_{today}"
+
+    # Check if batch exists for today
+    result = repo.client.table('batches').select('*').match({
+        'client_id': production_client_id,
+        'batch_number': batch_number
+    }).execute()
+
+    if result.data:
+        return result.data[0]
+
+    # Create new batch
+    new_batch = repo.client.table('batches').insert({
+        'client_id': production_client_id,
+        'batch_number': batch_number,
+        'status': 'complete',  # V2 dossiers arrive ready
+        'total_dossiers': 0,
+        'completed_dossiers': 0,
+        'created_at': datetime.now().isoformat()
+    }).execute()
+
+    return new_batch.data[0]
+
+
+def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
+    """Assemble find_lead JSONB from writer outputs."""
+    find_lead = {}
+
+    # From WRITER_INTRO (10_WRITER_INTRO)
+    intro_output = step_outputs.get('10_WRITER_INTRO', {})
+    if intro_output:
+        clean = extract_clean_content(intro_output.get('output', {}))
+        if isinstance(clean, dict):
+            find_lead['one_liner'] = clean.get('one_liner', '')
+            find_lead['the_angle'] = clean.get('the_angle', '')
+            find_lead['score_explanation'] = clean.get('score_explanation', '')
+            find_lead['lead_score'] = clean.get('lead_score', 0)
+
+    # From WRITER_SIGNALS (10_WRITER_SIGNALS)
+    signals_output = step_outputs.get('10_WRITER_SIGNALS', {})
+    if signals_output:
+        clean = extract_clean_content(signals_output.get('output', {}))
+        if isinstance(clean, dict):
+            find_lead['timing_urgency'] = clean.get('timing_urgency', 'MEDIUM')
+            find_lead['primary_buying_signal'] = clean.get('primary_buying_signal', {})
+            # Additional signals go to enrich_lead
+
+    # From WRITER_OPPORTUNITY (10_WRITER_OPPORTUNITY)
+    opp_output = step_outputs.get('10_WRITER_OPPORTUNITY', {})
+    if opp_output:
+        clean = extract_clean_content(opp_output.get('output', {}))
+        if isinstance(clean, dict):
+            find_lead['company_snapshot'] = clean.get('company_snapshot', {})
+
+    # Add company_name from seed
+    if seed_data:
+        find_lead['company_name'] = seed_data.get('company_name', seed_data.get('name', ''))
+
+    return find_lead
+
+
+def assemble_enrich_lead(step_outputs: dict) -> dict:
+    """Assemble enrich_lead JSONB from writer outputs."""
+    enrich_lead = {}
+
+    # From WRITER_LEAD_INTELLIGENCE (10_WRITER_LEAD_INTELLIGENCE)
+    intel_output = step_outputs.get('10_WRITER_LEAD_INTELLIGENCE', {})
+    if intel_output:
+        clean = extract_clean_content(intel_output.get('output', {}))
+        if isinstance(clean, dict):
+            enrich_lead['company_deep_dive'] = clean.get('company_deep_dive', {})
+            enrich_lead['network_intelligence'] = clean.get('network_intelligence', {})
+
+    # From WRITER_OPPORTUNITY (10_WRITER_OPPORTUNITY) - project_sites
+    opp_output = step_outputs.get('10_WRITER_OPPORTUNITY', {})
+    if opp_output:
+        clean = extract_clean_content(opp_output.get('output', {}))
+        if isinstance(clean, dict):
+            enrich_lead['project_sites'] = clean.get('project_sites', [])
+
+    # From WRITER_SIGNALS (10_WRITER_SIGNALS) - additional_signals
+    signals_output = step_outputs.get('10_WRITER_SIGNALS', {})
+    if signals_output:
+        clean = extract_clean_content(signals_output.get('output', {}))
+        if isinstance(clean, dict):
+            enrich_lead['additional_signals'] = clean.get('additional_signals', [])
+
+    return enrich_lead
+
+
+def assemble_insight(step_outputs: dict) -> dict:
+    """Assemble insight JSONB from WRITER_STRATEGY output."""
+    insight = {}
+
+    # From WRITER_STRATEGY (10_WRITER_STRATEGY)
+    strategy_output = step_outputs.get('10_WRITER_STRATEGY', {})
+    if strategy_output:
+        clean = extract_clean_content(strategy_output.get('output', {}))
+        if isinstance(clean, dict):
+            insight['the_math'] = clean.get('the_math', {})
+            insight['deal_strategy'] = clean.get('deal_strategy', {})
+            insight['competitive_positioning'] = clean.get('competitive_positioning', {})
+            insight['decision_making_process'] = clean.get('decision_making_process', {})
+
+    # Collect sources from all steps
+    sources = []
+    for step_name, step_data in step_outputs.items():
+        clean = extract_clean_content(step_data.get('output', {}))
+        if isinstance(clean, dict) and 'sources' in clean:
+            sources.extend(clean['sources'])
+    insight['sources'] = sources
+
+    return insight
+
+
+def assemble_copy(step_outputs: dict, contact_id_map: dict) -> dict:
+    """
+    Assemble copy JSONB from contact outputs and WRITER_STRATEGY.
+    contact_id_map: {index: production_contact_uuid}
+    """
+    copy_data = {
+        'outreach': [],
+        'objections': [],
+        'conversation_starters': []
+    }
+
+    # From WRITER_STRATEGY - objections and conversation_starters
+    strategy_output = step_outputs.get('10_WRITER_STRATEGY', {})
+    if strategy_output:
+        clean = extract_clean_content(strategy_output.get('output', {}))
+        if isinstance(clean, dict):
+            copy_data['objections'] = clean.get('objections', [])
+            copy_data['conversation_starters'] = clean.get('conversation_starters', [])
+
+    # Outreach is built per-contact during contact insertion
+    # The contact_id_map will be populated with production UUIDs
+
+    return copy_data
+
+
+def assemble_media(step_outputs: dict) -> dict:
+    """Assemble media JSONB from 8_MEDIA output."""
+    media = {}
+
+    media_output = step_outputs.get('8_MEDIA', {})
+    if media_output:
+        clean = extract_clean_content(media_output.get('output', {}))
+        if isinstance(clean, dict):
+            media['logo_url'] = clean.get('logo_url', '')
+            media['logo_fallback_chain'] = clean.get('logo_fallback_chain', [])
+            media['project_images'] = clean.get('project_images', clean.get('recommended_project_images', []))
+
+    return media
+
+
+@router.post("/publish/{run_id}", response_model=PublishResponse)
+async def publish_to_production(run_id: str, request: PublishRequest = None):
+    """
+    Publish a v2 dossier to production tables.
+
+    This endpoint:
+    1. Fetches all completed step outputs for the run
+    2. Resolves v2_client → production client UUID
+    3. Gets or creates a daily V2 batch
+    4. Assembles JSONB columns (find_lead, enrich_lead, copy, insight, media)
+    5. Inserts contacts into production contacts table
+    6. Builds outreach array with production contact UUIDs
+    7. Inserts dossier into production dossiers table
+
+    Make.com usage (final step after all writers complete):
+        HTTP POST /columnline/publish/{{run_id}}
+        Body: {"release_date": "2026-01-20"}  // Optional - immediate if not provided
+
+        Response: {
+            "success": true,
+            "run_id": "RUN_...",
+            "production_dossier_id": "uuid-...",
+            "production_batch_id": "uuid-...",
+            "contacts_created": 3,
+            "pipeline_version": "v2"
+        }
+    """
+    import uuid
+
+    if request is None:
+        request = PublishRequest()
+
+    # 1. Get the v2 run
+    run = repo.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    # 2. Get v2 client and resolve to production client
+    v2_client = repo.get_client(run['client_id'])
+    if not v2_client:
+        raise HTTPException(status_code=404, detail=f"V2 client not found: {run['client_id']}")
+
+    production_client_id = v2_client.get('production_client_id')
+    if not production_client_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"V2 client {run['client_id']} has no production_client_id mapping. Run the migration first."
+        )
+
+    # 3. Get or create daily V2 batch
+    batch = get_or_create_v2_batch(production_client_id)
+
+    # 4. Fetch all completed step outputs
+    step_outputs = {}
+    steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('status', 'completed').execute()
+    for step in steps.data:
+        step_outputs[step['step_name']] = step
+
+    # 5. Get seed data
+    seed_data = run.get('seed_data', {})
+
+    # 6. Assemble JSONB columns
+    find_lead = assemble_find_lead(step_outputs, seed_data)
+    enrich_lead = assemble_enrich_lead(step_outputs)
+    insight_data = assemble_insight(step_outputs)
+    media_data = assemble_media(step_outputs)
+
+    # 7. Insert contacts and build ID map
+    contact_id_map = {}
+    contacts_created = 0
+
+    # Get contacts from 6_ENRICH_CONTACTS output
+    contacts_step = step_outputs.get('6_ENRICH_CONTACTS', {})
+    contacts_list = []
+    if contacts_step:
+        clean = extract_clean_content(contacts_step.get('output', {}))
+        if isinstance(clean, dict):
+            contacts_list = clean.get('contacts', clean.get('enriched_contacts', clean.get('key_contacts', [])))
+        elif isinstance(clean, list):
+            contacts_list = clean
+
+    # Generate production dossier ID
+    production_dossier_id = str(uuid.uuid4())
+
+    # Insert each contact into production contacts table
+    outreach_list = []
+    for idx, contact in enumerate(contacts_list):
+        if not isinstance(contact, dict):
+            continue
+
+        contact_data = {
+            'dossier_id': production_dossier_id,
+            'name': contact.get('name', f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()),
+            'first_name': contact.get('first_name'),
+            'last_name': contact.get('last_name'),
+            'title': contact.get('title', contact.get('role')),
+            'email': contact.get('email'),
+            'phone': contact.get('phone'),
+            'linkedin_url': contact.get('linkedin_url', contact.get('linkedin')),
+            'bio_paragraph': contact.get('bio_paragraph', contact.get('bio', contact.get('why_they_matter', ''))),
+            'is_primary': idx == 0,  # First contact is primary
+            'source': contact.get('source', 'research'),
+            'created_at': datetime.now().isoformat()
+        }
+
+        # Insert contact
+        result = repo.client.table('contacts').insert(contact_data).execute()
+        if result.data:
+            prod_contact_id = result.data[0]['id']
+            contact_id_map[idx] = prod_contact_id
+            contacts_created += 1
+
+            # Build outreach entry for this contact
+            outreach_entry = {
+                'contact_id': prod_contact_id,
+                'target_name': contact_data['name'],
+                'target_title': contact_data['title'] or '',
+                'email_subject': contact.get('email_subject', contact.get('email_copy', {}).get('subject', '')),
+                'email_body': contact.get('email_body', contact.get('email_copy', {}).get('body', '')),
+                'linkedin_message': contact.get('linkedin_message', contact.get('linkedin_copy', ''))
+            }
+            outreach_list.append(outreach_entry)
+
+    # 8. Assemble copy with contact IDs
+    copy_data = assemble_copy(step_outputs, contact_id_map)
+    copy_data['outreach'] = outreach_list
+
+    # 9. Determine release timing
+    released_at = None
+    release_date = request.release_date
+    if not release_date:
+        # Immediate release
+        released_at = datetime.now().isoformat()
+
+    # 10. Insert dossier into production table
+    company_name = seed_data.get('company_name', seed_data.get('name', find_lead.get('company_name', 'Unknown')))
+    company_domain = seed_data.get('domain', seed_data.get('company_domain', find_lead.get('company_snapshot', {}).get('domain')))
+
+    dossier_data = {
+        'id': production_dossier_id,
+        'client_id': production_client_id,
+        'batch_id': batch['id'],
+        'company_name': company_name,
+        'company_domain': company_domain,
+        'find_leads': find_lead,  # Note: column is 'find_leads' with 's'
+        'enrich_lead': enrich_lead,
+        'copy': copy_data,
+        'insight': insight_data,
+        'media': media_data,
+        'lead_score': find_lead.get('lead_score', 0),
+        'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
+        'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
+        'status': 'ready',
+        'pipeline_version': 'v2',
+        'agents_completed': ['find-lead', 'enrich-contacts', 'enrich-lead', 'write-copy', 'insight', 'enrich-media'],
+        'release_date': release_date,
+        'released_at': released_at,
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+
+    repo.client.table('dossiers').insert(dossier_data).execute()
+
+    # 11. Update batch counts
+    repo.client.table('batches').update({
+        'total_dossiers': batch.get('total_dossiers', 0) + 1,
+        'completed_dossiers': batch.get('completed_dossiers', 0) + 1
+    }).eq('id', batch['id']).execute()
+
+    # 12. Update v2 run with production dossier ID
+    repo.update_run(run_id, {
+        'production_dossier_id': production_dossier_id,
+        'status': 'published'
+    })
+
+    return PublishResponse(
+        success=True,
+        run_id=run_id,
+        production_dossier_id=production_dossier_id,
+        production_batch_id=batch['id'],
+        contacts_created=contacts_created,
+        pipeline_version='v2',
+        released_at=released_at,
+        release_date=release_date,
+        message=f"Dossier published to production with {contacts_created} contacts"
     )
