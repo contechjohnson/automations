@@ -2174,3 +2174,35 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         release_date=release_date,
         message=f"Dossier published to production with {contacts_created} contacts"
     )
+
+
+# ============================================================================
+# DELETE PRODUCTION DOSSIER
+# ============================================================================
+
+@router.delete("/dossiers/{dossier_id}")
+async def delete_production_dossier(dossier_id: str):
+    """
+    Delete a production dossier and its contacts.
+
+    Use this to clean up broken/test dossiers.
+
+    Usage:
+        DELETE /columnline/dossiers/295e4b86-5b5d-4c01-8be6-8448376ab8f0
+    """
+    # Delete contacts first (FK constraint)
+    contacts_result = repo.client.table('contacts').delete().eq('dossier_id', dossier_id).execute()
+    contacts_deleted = len(contacts_result.data) if contacts_result.data else 0
+
+    # Delete dossier
+    dossier_result = repo.client.table('dossiers').delete().eq('id', dossier_id).execute()
+
+    if not dossier_result.data:
+        raise HTTPException(status_code=404, detail=f"Dossier not found: {dossier_id}")
+
+    return {
+        "success": True,
+        "dossier_id": dossier_id,
+        "contacts_deleted": contacts_deleted,
+        "message": f"Dossier deleted with {contacts_deleted} contacts"
+    }
