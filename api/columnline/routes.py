@@ -1922,6 +1922,21 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
         }
     """
     import uuid
+    import traceback
+
+    try:
+        return await _publish_to_production_impl(run_id, request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"PUBLISH ERROR for {run_id}: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Publish failed: {str(e)}")
+
+
+async def _publish_to_production_impl(run_id: str, request: PublishRequest = None):
+    """Internal implementation of publish_to_production"""
+    import uuid
 
     if request is None:
         request = PublishRequest()
