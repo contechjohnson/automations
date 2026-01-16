@@ -2161,3 +2161,459 @@ async def delete_production_dossier(dossier_id: str):
         "contacts_deleted": contacts_deleted,
         "message": f"Dossier deleted with {contacts_deleted} contacts"
     }
+
+
+# ============================================================================
+# PREP INPUTS (COMPRESSION) ENDPOINTS
+# ============================================================================
+
+PREP_STEPS = ["compress_icp", "compress_industry", "compress_research_context", "compress_batch_strategy"]
+
+PREP_STEP_CONFIG = {
+    "compress_icp": {
+        "prompt_step": "00B_COMPRESS_ICP",
+        "prompt_slug": "compress-icp-config",
+        "source_field": "icp_config",
+        "target_field": "icp_config_compressed"
+    },
+    "compress_industry": {
+        "prompt_step": "00B_COMPRESS_INDUSTRY",
+        "prompt_slug": "compress-industry-research",
+        "source_field": "industry_research",
+        "target_field": "industry_research_compressed"
+    },
+    "compress_research_context": {
+        "prompt_step": "00B_COMPRESS_RESEARCH_CONTEXT",
+        "prompt_slug": "compress-research-context",
+        "source_field": "research_context",
+        "target_field": "research_context_compressed"
+    },
+    "compress_batch_strategy": {
+        "prompt_step": "00B_COMPRESS_BATCH_STRATEGY",
+        "prompt_slug": "compress-batch-strategy",
+        "source_field": "batch_strategy",
+        "target_field": "batch_strategy_compressed"
+    }
+}
+
+
+@router.post("/clients/prep/start", response_model=PrepStartResponse)
+async def start_prep(request: PrepStartRequest):
+    """
+    Start config compression for a client.
+
+    Compresses ICP, industry research, research context, and batch strategy
+    from verbose originals to token-efficient versions (40-60% reduction).
+
+    Make.com usage:
+        HTTP POST /columnline/clients/prep/start
+        Body: {"client_id": "CLT_EXAMPLE_001"}
+
+        Response: {
+            "prep_id": "PREP_...",
+            "steps": ["compress_icp", "compress_industry", ...],
+            "first_step": "compress_icp"
+        }
+    """
+    # Validate client exists
+    client = repo.get_client(request.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+
+    # Generate prep_id
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    prep_id = f"PREP_{timestamp}"
+
+    # Create prep record
+    prep_data = {
+        "prep_id": prep_id,
+        "client_id": request.client_id,
+        "status": "pending",
+        "current_step": PREP_STEPS[0],
+        "steps_completed": [],
+        "original_icp_config": client.get('icp_config'),
+        "original_industry_research": client.get('industry_research'),
+        "original_research_context": client.get('research_context'),
+        "original_batch_strategy": client.get('batch_strategy'),
+        "started_at": datetime.now().isoformat()
+    }
+
+    repo.create_prep(prep_data)
+
+    return PrepStartResponse(
+        success=True,
+        prep_id=prep_id,
+        client_id=request.client_id,
+        steps=PREP_STEPS,
+        first_step=PREP_STEPS[0],
+        message="Prep started successfully"
+    )
+
+
+@router.post("/clients/prep/prepare", response_model=PrepPrepareResponse)
+async def prepare_prep_step(request: PrepPrepareRequest):
+    """
+    Prepare a compression step with prompt and full config to compress.
+
+    Make.com usage:
+        HTTP POST /columnline/clients/prep/prepare
+        Body: {"prep_id": "PREP_...", "step_name": "compress_icp"}
+
+        Response: {
+            "prompt_template": "...",
+            "input": {"icp_config": {...}}  // Full config to compress
+        }
+
+        Then Make.com runs the LLM with prompt_template + input
+    """
+    # Get prep record
+    prep = repo.get_prep(request.prep_id)
+    if not prep:
+        raise HTTPException(status_code=404, detail=f"Prep not found: {request.prep_id}")
+
+    # Validate step name
+    if request.step_name not in PREP_STEP_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Invalid step name: {request.step_name}. Valid steps: {list(PREP_STEP_CONFIG.keys())}")
+
+    step_config = PREP_STEP_CONFIG[request.step_name]
+
+    # Get client for source config
+    client = repo.get_client(prep['client_id'])
+    if not client:
+        raise HTTPException(status_code=404, detail=f"Client not found: {prep['client_id']}")
+
+    # Get prompt
+    prompt = repo.get_prompt_by_step(step_config['prompt_step'])
+    if not prompt:
+        prompt = repo.get_prompt_by_slug(step_config['prompt_slug'])
+    if not prompt:
+        raise HTTPException(status_code=404, detail=f"Prompt not found for step: {step_config['prompt_step']}")
+
+    # Build input with the full config to compress
+    source_config = client.get(step_config['source_field'])
+    step_input = {
+        step_config['source_field']: source_config,
+        "client_name": client.get('client_name')
+    }
+
+    # Update prep status
+    repo.update_prep(request.prep_id, {"current_step": request.step_name})
+
+    return PrepPrepareResponse(
+        prep_id=request.prep_id,
+        step_name=request.step_name,
+        prompt_id=prompt['prompt_id'],
+        prompt_template=prompt['prompt_template'],
+        model_used="gpt-4.1",
+        input=step_input
+    )
+
+
+@router.post("/clients/prep/complete", response_model=PrepCompleteResponse)
+async def complete_prep_step(request: PrepCompleteRequest):
+    """
+    Complete a compression step and store the compressed config.
+
+    Make.com usage:
+        HTTP POST /columnline/clients/prep/complete
+        Body: {
+            "prep_id": "PREP_...",
+            "step_name": "compress_icp",
+            "output": {{entire_openai_response}}
+        }
+
+        Response: {
+            "success": true,
+            "next_step": "compress_industry",  // or null if done
+            "tokens_saved": 1200
+        }
+    """
+    # Get prep record
+    prep = repo.get_prep(request.prep_id)
+    if not prep:
+        raise HTTPException(status_code=404, detail=f"Prep not found: {request.prep_id}")
+
+    # Validate step name
+    if request.step_name not in PREP_STEP_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Invalid step name: {request.step_name}")
+
+    step_config = PREP_STEP_CONFIG[request.step_name]
+
+    # Parse LLM output
+    clean_output = extract_clean_content(request.output)
+
+    # Calculate token savings (rough estimate based on JSON size)
+    original_config = prep.get(f"original_{step_config['source_field'].replace('_config', '')}_config") or prep.get(f"original_{step_config['source_field']}")
+    import json
+    original_tokens = len(json.dumps(original_config or {})) // 4  # Rough estimate
+    compressed_tokens = len(json.dumps(clean_output or {})) // 4
+    tokens_saved = max(0, original_tokens - compressed_tokens)
+
+    # Update client with compressed field
+    repo.update_client_compressed(prep['client_id'], step_config['target_field'], clean_output)
+
+    # Update prep record
+    steps_completed = prep.get('steps_completed', []) or []
+    steps_completed.append(request.step_name)
+
+    # Determine next step
+    current_index = PREP_STEPS.index(request.step_name)
+    next_step = PREP_STEPS[current_index + 1] if current_index + 1 < len(PREP_STEPS) else None
+
+    # Update prep
+    prep_updates = {
+        "steps_completed": steps_completed,
+        f"compressed_{step_config['source_field']}": clean_output
+    }
+    if next_step:
+        prep_updates["current_step"] = next_step
+    else:
+        prep_updates["status"] = "completed"
+        prep_updates["completed_at"] = datetime.now().isoformat()
+
+    repo.update_prep(request.prep_id, prep_updates)
+
+    return PrepCompleteResponse(
+        success=True,
+        prep_id=request.prep_id,
+        step_name=request.step_name,
+        next_step=next_step,
+        tokens_saved=tokens_saved,
+        message=f"Step {request.step_name} completed" + (f", next: {next_step}" if next_step else ", all steps done")
+    )
+
+
+# ============================================================================
+# CLIENT ONBOARDING ENDPOINTS
+# ============================================================================
+
+ONBOARD_STEPS = ["consolidate_intake", "generate_configs"]
+
+
+@router.post("/clients/onboard/start", response_model=OnboardStartResponse)
+async def start_onboarding(request: OnboardStartRequest):
+    """
+    Start client onboarding from raw intake data.
+
+    Takes transcripts, website, narrative, materials and generates
+    the 4 client configs (ICP, industry, research_context, batch_strategy).
+
+    Make.com usage:
+        HTTP POST /columnline/clients/onboard/start
+        Body: {
+            "client_name": "Acme Construction",
+            "intake_data": {
+                "transcripts": "...",
+                "website": "acme.com",
+                "narrative": "...",
+                "materials": "..."
+            }
+        }
+
+        Response: {
+            "onboarding_id": "ONB_...",
+            "client_id": "CLT_...",
+            "steps": ["consolidate_intake", "generate_configs"],
+            "first_step": "consolidate_intake"
+        }
+    """
+    # Generate IDs
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    onboarding_id = f"ONB_{timestamp}"
+
+    # Create client_id from client name (sanitized)
+    import re
+    sanitized_name = re.sub(r'[^a-zA-Z0-9]', '_', request.client_name.upper())[:20]
+    client_id = f"CLT_{sanitized_name}_{timestamp[-6:]}"
+
+    # Create client record first
+    client_data = {
+        "client_id": client_id,
+        "client_name": request.client_name,
+        "status": "onboarding"
+    }
+    repo.create_client(client_data)
+
+    # Create onboarding record
+    onboarding_data = {
+        "onboarding_id": onboarding_id,
+        "client_name": request.client_name,
+        "client_id": client_id,
+        "status": "in_progress",
+        "intake_data": request.intake_data,
+        "current_step": ONBOARD_STEPS[0],
+        "steps_completed": [],
+        "started_at": datetime.now().isoformat()
+    }
+
+    repo.create_onboarding(onboarding_data)
+
+    return OnboardStartResponse(
+        success=True,
+        onboarding_id=onboarding_id,
+        client_id=client_id,
+        steps=ONBOARD_STEPS,
+        first_step=ONBOARD_STEPS[0],
+        message="Onboarding started successfully"
+    )
+
+
+@router.post("/clients/onboard/prepare", response_model=OnboardPrepareResponse)
+async def prepare_onboarding_step(request: OnboardPrepareRequest):
+    """
+    Prepare an onboarding step with prompt and inputs.
+
+    Step 1 (consolidate_intake): Process all raw inputs into unified format
+    Step 2 (generate_configs): Generate all 4 configs from consolidated info
+
+    Make.com usage:
+        HTTP POST /columnline/clients/onboard/prepare
+        Body: {"onboarding_id": "ONB_...", "step_name": "consolidate_intake"}
+
+        Response: {
+            "prompt_template": "...",
+            "input": {...}
+        }
+    """
+    # Get onboarding record
+    onboarding = repo.get_onboarding(request.onboarding_id)
+    if not onboarding:
+        raise HTTPException(status_code=404, detail=f"Onboarding not found: {request.onboarding_id}")
+
+    # Validate step name
+    if request.step_name not in ONBOARD_STEPS:
+        raise HTTPException(status_code=400, detail=f"Invalid step name: {request.step_name}. Valid steps: {ONBOARD_STEPS}")
+
+    # Get prompt based on step
+    if request.step_name == "consolidate_intake":
+        prompt = repo.get_prompt_by_step("00A_CONSOLIDATE_INTAKE")
+        if not prompt:
+            prompt = repo.get_prompt_by_slug("consolidate-intake")
+
+        step_input = {
+            "client_name": onboarding.get('client_name'),
+            "transcripts": onboarding.get('intake_data', {}).get('transcripts'),
+            "website": onboarding.get('intake_data', {}).get('website'),
+            "narrative": onboarding.get('intake_data', {}).get('narrative'),
+            "pre_research": onboarding.get('intake_data', {}).get('pre_research'),
+            "materials": onboarding.get('intake_data', {}).get('materials')
+        }
+        # Remove None values
+        step_input = {k: v for k, v in step_input.items() if v is not None}
+
+    elif request.step_name == "generate_configs":
+        prompt = repo.get_prompt_by_step("00A_GENERATE_CONFIGS")
+        if not prompt:
+            prompt = repo.get_prompt_by_slug("generate-configs")
+
+        step_input = {
+            "client_name": onboarding.get('client_name'),
+            "consolidated_info": onboarding.get('consolidated_info', {})
+        }
+
+    if not prompt:
+        raise HTTPException(status_code=404, detail=f"Prompt not found for step: {request.step_name}. You may need to create it first.")
+
+    # Update current step
+    repo.update_onboarding(request.onboarding_id, {"current_step": request.step_name})
+
+    return OnboardPrepareResponse(
+        onboarding_id=request.onboarding_id,
+        step_name=request.step_name,
+        prompt_id=prompt['prompt_id'],
+        prompt_template=prompt['prompt_template'],
+        model_used="gpt-4.1",
+        input=step_input
+    )
+
+
+@router.post("/clients/onboard/complete", response_model=OnboardCompleteResponse)
+async def complete_onboarding_step(request: OnboardCompleteRequest):
+    """
+    Complete an onboarding step and store results.
+
+    Step 1 output: consolidated_info (stored for step 2)
+    Step 2 output: All 4 configs (stored to v2_clients)
+
+    Make.com usage:
+        HTTP POST /columnline/clients/onboard/complete
+        Body: {
+            "onboarding_id": "ONB_...",
+            "step_name": "consolidate_intake",
+            "output": {{entire_openai_response}}
+        }
+
+        Response: {
+            "success": true,
+            "next_step": "generate_configs"  // or null if done
+        }
+    """
+    # Get onboarding record
+    onboarding = repo.get_onboarding(request.onboarding_id)
+    if not onboarding:
+        raise HTTPException(status_code=404, detail=f"Onboarding not found: {request.onboarding_id}")
+
+    # Validate step name
+    if request.step_name not in ONBOARD_STEPS:
+        raise HTTPException(status_code=400, detail=f"Invalid step name: {request.step_name}")
+
+    # Parse LLM output
+    clean_output = extract_clean_content(request.output)
+
+    # Update based on step
+    steps_completed = onboarding.get('steps_completed', []) or []
+    steps_completed.append(request.step_name)
+
+    current_index = ONBOARD_STEPS.index(request.step_name)
+    next_step = ONBOARD_STEPS[current_index + 1] if current_index + 1 < len(ONBOARD_STEPS) else None
+
+    configs_generated = None
+
+    if request.step_name == "consolidate_intake":
+        # Store consolidated info for next step
+        repo.update_onboarding(request.onboarding_id, {
+            "consolidated_info": clean_output,
+            "steps_completed": steps_completed,
+            "current_step": next_step
+        })
+
+    elif request.step_name == "generate_configs":
+        # Extract and store all 4 configs to v2_clients
+        client_updates = {}
+
+        if isinstance(clean_output, dict):
+            if 'icp_config' in clean_output:
+                client_updates['icp_config'] = clean_output['icp_config']
+            if 'industry_research' in clean_output:
+                client_updates['industry_research'] = clean_output['industry_research']
+            if 'research_context' in clean_output:
+                client_updates['research_context'] = clean_output['research_context']
+            if 'batch_strategy' in clean_output:
+                client_updates['batch_strategy'] = clean_output['batch_strategy']
+
+        # Update client with generated configs
+        if client_updates:
+            client_updates['status'] = 'active'  # Client is now fully onboarded
+            repo.update_client(onboarding['client_id'], client_updates)
+            configs_generated = list(client_updates.keys())
+            configs_generated = [c for c in configs_generated if c != 'status']
+
+        # Store generated configs in onboarding record too
+        repo.update_onboarding(request.onboarding_id, {
+            "generated_icp_config": clean_output.get('icp_config') if isinstance(clean_output, dict) else None,
+            "generated_industry_research": clean_output.get('industry_research') if isinstance(clean_output, dict) else None,
+            "generated_research_context": clean_output.get('research_context') if isinstance(clean_output, dict) else None,
+            "generated_batch_strategy": clean_output.get('batch_strategy') if isinstance(clean_output, dict) else None,
+            "steps_completed": steps_completed,
+            "status": "completed",
+            "completed_at": datetime.now().isoformat()
+        })
+
+    return OnboardCompleteResponse(
+        success=True,
+        onboarding_id=request.onboarding_id,
+        step_name=request.step_name,
+        next_step=next_step,
+        configs_generated=configs_generated,
+        message=f"Step {request.step_name} completed" + (f", next: {next_step}" if next_step else ", onboarding complete")
+    )
