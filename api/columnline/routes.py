@@ -2172,6 +2172,36 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                 contact_id_map[idx] = prod_contact_id
                 contacts_created += 1
 
+                # DUAL-WRITE: Also store in v2_contacts for observability
+                v2_contact_id = f"V2C_{run_id}_{idx}"
+                v2_contact_data = {
+                    'id': v2_contact_id,
+                    'run_id': run_id,
+                    'dossier_id': run.get('dossier_id'),  # v2 dossier_id
+                    'name': contact_name,
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'title': contact_data.get('title'),
+                    'email': email,
+                    'phone': contact.get('phone'),
+                    'linkedin_url': linkedin_url,
+                    'bio_paragraph': bio_paragraph,
+                    'is_primary': idx == 0,
+                    'source': 'v2_pipeline',
+                    'why_they_matter': contact.get('why_they_matter'),
+                    'signal_relevance': enrichment.get('SIGNAL_RELEVANCE'),
+                    'interesting_facts': enrichment.get('INTERESTING_FACTS'),
+                    'linkedin_summary': enrichment.get('LINKEDIN_SUMMARY'),
+                    'web_summary': enrichment.get('WEB_SUMMARY'),
+                    'confidence': contact.get('confidence')
+                }
+                # Remove None values
+                v2_contact_data = {k: v for k, v in v2_contact_data.items() if v is not None}
+                try:
+                    repo.create_contact(v2_contact_data)
+                except Exception as v2_err:
+                    print(f"Warning: Failed to write v2_contact for {contact_name}: {v2_err}")
+
                 # Build outreach entry for this contact
                 # Handle various formats for email/linkedin copy
                 email_copy = contact.get('email_copy', {})
