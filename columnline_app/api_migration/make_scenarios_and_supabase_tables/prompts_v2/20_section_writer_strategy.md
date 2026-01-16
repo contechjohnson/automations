@@ -204,10 +204,19 @@ From INSIGHT claims:
 
 ### Output Format
 
-Return valid JSON for `insight` column:
+Return valid JSON with fields for both `insight` and `copy` columns:
+
+**For `insight` column:** `the_math`, `deal_strategy`, `competitive_positioning`, `decision_making_process`
+**For `copy` column:** `objections`, `conversation_starters`
 
 ```json
 {
+  "the_math": {
+    "their_reality": "Brief summary of the target's current situation and needs",
+    "the_opportunity": "What makes this opportunity valuable for the client",
+    "translation": "Plain language explanation of what this means for sales approach",
+    "bottom_line": "One-sentence summary of the win scenario"
+  },
   "deal_strategy": {
     "win_probability": 71,
     "probability_breakdown": {
@@ -300,7 +309,18 @@ Return valid JSON for `insight` column:
       }
     }
   ],
-  "positioning": {
+  "conversation_starters": [
+    "Question about their project that shows you've done research",
+    "Reference to their recent announcement or milestone",
+    "Connection point based on shared background or mutual contact"
+  ],
+  "decision_making_process": {
+    "key_decision_makers": ["Role 1", "Role 2"],
+    "typical_timeline": "Description of how long decisions take",
+    "procurement_approach": "RFP, negotiated, EPCM-led, etc.",
+    "budget_authority": "Who controls budget, approval levels"
+  },
+  "competitive_positioning": {
     "the_angle": "The only contractor with proven ice road [industry] expertise AND specialized winter construction equipment for remote northern mines.",
     "the_why_now": "Vendor selection happening Q4 2025 - Q1 2026 as EPCM moves into detailed engineering. Early engagement prevents incumbent lock-in and allows technical input during design phase. Q2 2026 construction start requires vendor decisions NOW.",
     "the_proof": {
@@ -361,9 +381,14 @@ Return valid JSON for `insight` column:
 ## Variables Produced
 
 Fields added to `insight` JSONB column:
+- `the_math` - Summary of situation, opportunity, translation, bottom line
 - `deal_strategy` - Win probability, competitive landscape, success factors, risks
+- `competitive_positioning` - The angle, why now, proof, differentiation strategy
+- `decision_making_process` - Key decision makers, timeline, procurement approach
+
+Fields added to `copy` JSONB column:
 - `objections` - Array of objection-response pairs
-- `positioning` - The angle, why now, proof, differentiation strategy
+- `conversation_starters` - Array of conversation opener suggestions
 
 ---
 

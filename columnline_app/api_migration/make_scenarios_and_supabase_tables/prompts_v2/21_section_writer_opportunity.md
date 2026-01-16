@@ -148,10 +148,30 @@ Combine all categories into structured section with narrative flow.
 
 ### Output Format
 
-Return valid JSON for `enrich_lead` column:
+Return valid JSON with two root-level objects:
+- `company_snapshot` → Goes to `find_lead` column
+- `project_sites` → Goes to `enrich_lead` column
 
 ```json
 {
+  "company_snapshot": {
+    "company_name": "[Company Name]",
+    "description": "Short description of what the company does (1-2 sentences)",
+    "domain": "company-domain.com",
+    "hq_city": "[City]",
+    "hq_state": "[State/Province]",
+    "industry": "[Industry from ICP]"
+  },
+  "project_sites": [
+    {
+      "site_name": "[Project Name]",
+      "address": "[Full address or location description]",
+      "scope": "[Project scope summary]",
+      "status": "[Preconstruction|Construction|Operational]",
+      "estimated_value": "[Dollar amount if known]",
+      "construction_start": "[Date or quarter]"
+    }
+  ],
   "opportunity_details": {
     "project_specifications": {
       "scope_summary": "[Project Name] is a $1.2B underground nickel-copper-PGM mine in [Geography]'s Ring of Fire, 540km northeast of [Location]. Project includes 3.6km underground decline, 2,000 tpd processing plant, tailings management facility, 300-person camp, and 100km all-season access road.",
@@ -326,7 +346,11 @@ Return valid JSON for `enrich_lead` column:
 
 ## Variables Produced
 
+Fields added to `find_lead` JSONB column:
+- `company_snapshot` - Object with company name, description, domain, HQ location, industry
+
 Fields added to `enrich_lead` JSONB column:
+- `project_sites` - Array of project site objects with name, address, scope, status
 - `opportunity_details` - Object with project specifications, budget, timeline, procurement, vendor opportunities, risks
 
 ---

@@ -185,7 +185,7 @@ Return valid JSON for `enrich_lead` column:
 
 ```json
 {
-  "company_intel": {
+  "company_deep_dive": {
     "company_overview": "[Company Name] is a privately-held Canadian [industry from ICP] investment and development company focused on strategic metals (nickel, copper, cobalt). Headquartered in Perth, Australia with Canadian operations based in [Location], [Geography]. Acquired [Project Name] project from [Company] Resources in 2022 for $435M. Backed by billionaire Andrew [Owner]'s private investment vehicle.",
     "financial_profile": {
       "ownership": "Private (Andrew [Owner] / Tattarang)",
@@ -221,7 +221,7 @@ Return valid JSON for `enrich_lead` column:
       "past_patterns": "[Company] new to [industry from ICP] development - following [Partner Firm]'s vendor recommendations closely"
     }
   },
-  "network": {
+  "network_intelligence": {
     "warm_intro_paths": [
       {
         "type": "direct",
@@ -283,8 +283,8 @@ Return valid JSON for `enrich_lead` column:
 ## Variables Produced
 
 Fields added to `enrich_lead` JSONB column:
-- `company_intel` - Object with company profile, financials, leadership, competitive landscape, recent moves, buying patterns
-- `network` - Object with warm intro paths, alumni networks, professional overlaps, relationship leverage strategy
+- `company_deep_dive` - Object with company profile, financials, leadership, competitive landscape, recent moves, buying patterns
+- `network_intelligence` - Object with warm intro paths, alumni networks, professional overlaps, relationship leverage strategy
 
 ---
 

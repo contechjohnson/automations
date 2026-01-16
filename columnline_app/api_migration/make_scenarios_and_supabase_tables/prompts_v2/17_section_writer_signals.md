@@ -135,7 +135,7 @@ Return valid JSON for `find_lead` column (this section adds to existing INTRO da
 
 ```json
 {
-  "primary_signal": {
+  "primary_buying_signal": {
     "signal_type": "epcm_award",
     "description": "[EPCM Firm] awarded EPCM contract for $1.2B [Project Name] nickel mine",
     "date": "2025-07-15",
@@ -208,7 +208,7 @@ Return valid JSON for `find_lead` column (this section adds to existing INTRO da
 ## Variables Produced
 
 Fields added to `find_lead` JSONB column:
-- `primary_signal` - Object with signal details
+- `primary_buying_signal` - Object with signal details
 - `additional_signals` - Array of supporting signals
 - `timing_analysis` - Text explaining project timeline
 - `timing_urgency` - HIGH | MEDIUM | LOW
