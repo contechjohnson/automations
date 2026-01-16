@@ -182,62 +182,12 @@ class ColumnlineRepository:
         return outputs
 
     # ========================================================================
-    # CLAIMS (Claims Storage)
     # ========================================================================
-
-    def create_claims(self, claims_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Store claims from a research step"""
-        result = self.client.table('v2_claims').insert(claims_data).execute()
-        return result.data[0]
-
-    def get_claims(self, run_id: str) -> List[Dict[str, Any]]:
-        """Get all claims for a run"""
-        result = self.client.table('v2_claims').select('*').eq('run_id', run_id).execute()
-        return result.data
-
+    # REMOVED: CLAIMS, SECTIONS, DOSSIERS
+    # These tables were dropped in v2 schema cleanup (2026-01-15)
+    # Claims/Sections stored in v2_pipeline_steps.output
+    # Dossiers go to production via /publish
     # ========================================================================
-    # SECTIONS (Section Storage)
-    # ========================================================================
-
-    def create_section(self, section_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Store a dossier section"""
-        result = self.client.table('v2_sections').insert(section_data).execute()
-        return result.data[0]
-
-    def get_sections(self, run_id: str) -> List[Dict[str, Any]]:
-        """Get all sections for a run"""
-        result = self.client.table('v2_sections').select('*').eq('run_id', run_id).execute()
-        return result.data
-
-    # ========================================================================
-    # DOSSIERS (Dossier Assembly)
-    # ========================================================================
-
-    def create_dossier(self, dossier_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a dossier"""
-        result = self.client.table('v2_dossiers').insert(dossier_data).execute()
-        return result.data[0]
-
-    def update_dossier(self, dossier_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
-        """Update dossier"""
-        result = self.client.table('v2_dossiers').update(updates).eq('dossier_id', dossier_id).execute()
-        return result.data[0]
-
-    def get_dossier(self, dossier_id: str) -> Optional[Dict[str, Any]]:
-        """Get dossier by ID"""
-        result = self.client.table('v2_dossiers').select('*').eq('dossier_id', dossier_id).execute()
-
-        if result.data:
-            return result.data[0]
-        return None
-
-    def get_dossier_by_run_id(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """Get dossier by run ID"""
-        result = self.client.table('v2_dossiers').select('*').eq('run_id', run_id).execute()
-
-        if result.data:
-            return result.data[0]
-        return None
 
     # ========================================================================
     # CONTACTS (Contact Storage)

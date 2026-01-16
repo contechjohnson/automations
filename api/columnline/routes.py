@@ -14,7 +14,6 @@ from .models import (
     RunStartRequest, RunStartResponse,
     RunCreate, RunUpdate, RunStatus,
     PipelineStepCreate, PipelineStepUpdate, PipelineStepComplete,
-    ClaimsCreate,
     ConfigsResponse, ClientConfig, PromptConfig,
     OutputsResponse, StepOutput,
     SuccessResponse,
@@ -487,44 +486,7 @@ async def check_step_completed(
 # CLAIMS ENDPOINTS
 # ============================================================================
 
-@router.post("/claims", response_model=SuccessResponse)
-async def store_claims(claims: ClaimsCreate):
-    """
-    Store claims from a research step
-
-    Make.com usage (sub-scenario - if produce_claims = true):
-        [1] Parse LLM response for claims
-        [2] HTTP POST /columnline/claims
-            Body: {
-                run_id: {{run_id}},
-                step_id: {{step_id}},
-                step_name: "3_ENTITY_RESEARCH",
-                claims_json: {{parsed_claims}}
-            }
-    """
-    result = repo.create_claims(claims.dict())
-
-    return SuccessResponse(
-        success=True,
-        message="Claims stored",
-        data={
-            "run_id": result['run_id'],
-            "step_id": result['step_id']
-        }
-    )
-
-
-@router.get("/claims/{run_id}")
-async def get_claims(run_id: str):
-    """Get all claims for a run"""
-    claims = repo.get_claims(run_id)
-
-    return {
-        "run_id": run_id,
-        "claims": claims,
-        "count": len(claims)
-    }
-
+# NOTE: POST/GET /claims removed - claims stored in v2_pipeline_steps.output
 
 # ============================================================================
 # BATCH STEP EXECUTION (Prepare + Complete)
@@ -1321,114 +1283,20 @@ async def transition_step(request: StepTransitionRequest):
 # SECTION ENDPOINTS
 # ============================================================================
 
-@router.post("/sections", response_model=SuccessResponse)
-async def create_section(section_data: dict):
-    """
-    Store a dossier section
-
-    Make.com usage (section writer):
-        HTTP POST /columnline/sections
-        Body: {
-            section_id: "SEC_{{run_id}}_INTRO",
-            run_id: {{run_id}},
-            section_name: "INTRO",
-            section_data: {{section_content}},
-            produced_by_step: "8A_INTRO_WRITER"
-        }
-    """
-    result = repo.create_section(section_data)
-
-    return SuccessResponse(
-        success=True,
-        message="Section stored",
-        data={"section_id": result['section_id']}
-    )
-
-
-@router.get("/sections/{run_id}")
-async def get_sections(run_id: str):
-    """Get all sections for a run"""
-    sections = repo.get_sections(run_id)
-
-    return {
-        "run_id": run_id,
-        "sections": sections,
-        "count": len(sections)
-    }
-
+# NOTE: POST/GET /sections removed - sections stored in v2_pipeline_steps.output
 
 # ============================================================================
 # DOSSIER ENDPOINTS
 # ============================================================================
 
-@router.post("/dossiers", response_model=SuccessResponse)
-async def create_dossier(dossier_data: dict):
-    """
-    Create a dossier
-
-    Make.com usage (dossier assembly):
-        HTTP POST /columnline/dossiers
-        Body: {
-            dossier_id: {{dossier_id}},
-            run_id: {{run_id}},
-            client_id: {{client_id}},
-            company_name: {{company_name}},
-            lead_score: {{score}},
-            ...
-        }
-    """
-    result = repo.create_dossier(dossier_data)
-
-    return SuccessResponse(
-        success=True,
-        message="Dossier created",
-        data={"dossier_id": result['dossier_id']}
-    )
-
-
-@router.put("/dossiers/{dossier_id}", response_model=SuccessResponse)
-async def update_dossier(dossier_id: str, updates: dict):
-    """Update dossier"""
-    result = repo.update_dossier(dossier_id, updates)
-
-    return SuccessResponse(
-        success=True,
-        message="Dossier updated",
-        data={"dossier_id": result['dossier_id']}
-    )
-
-
-@router.get("/dossiers/{dossier_id}")
-async def get_dossier(dossier_id: str):
-    """Get dossier by ID"""
-    dossier = repo.get_dossier(dossier_id)
-    if not dossier:
-        raise HTTPException(status_code=404, detail=f"Dossier not found: {dossier_id}")
-
-    return dossier
-
+# NOTE: POST/PUT/GET v2_dossiers removed - dossiers go to production via /publish
+# DELETE endpoint kept below in PUBLISH section for cleanup
 
 # ============================================================================
 # CONTACT ENDPOINTS
 # ============================================================================
 
-@router.post("/contacts", response_model=SuccessResponse)
-async def create_contact(contact_data: dict):
-    """
-    Store a discovered contact
-
-    Make.com usage (contact discovery):
-        HTTP POST /columnline/contacts
-        Body: {contact fields}
-    """
-    result = repo.create_contact(contact_data)
-
-    return SuccessResponse(
-        success=True,
-        message="Contact stored",
-        data={"contact_id": result['id']}
-    )
-
+# NOTE: POST /contacts removed - contacts populated via /publish dual-write
 
 @router.get("/contacts/{run_id}")
 async def get_contacts(run_id: str):
