@@ -1886,7 +1886,10 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     for step in individual_steps.data:
         enrichment = extract_clean_content(step.get('output', {}))
         if isinstance(enrichment, dict):
-            contact_name = (enrichment.get('FIRST_NAME', '') + ' ' + enrichment.get('LAST_NAME', '')).strip()
+            # Try multiple field name patterns (uppercase from old prompts, lowercase from new)
+            first = enrichment.get('FIRST_NAME') or enrichment.get('first_name') or ''
+            last = enrichment.get('LAST_NAME') or enrichment.get('last_name') or ''
+            contact_name = enrichment.get('name') or f"{first} {last}".strip()
             if contact_name:
                 individual_enrichments[contact_name.lower()] = enrichment
                 print(f"  Found enrichment for: {contact_name}")
@@ -2018,36 +2021,56 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         enrichment = individual_enrichments.get(contact_name.lower(), {})
 
         # Merge base contact data with individual enrichment
-        first_name = enrichment.get('FIRST_NAME') or contact.get('first_name') or contact_name.split()[0] if contact_name else ''
-        last_name = enrichment.get('LAST_NAME') or contact.get('last_name') or (contact_name.split()[-1] if len(contact_name.split()) > 1 else '')
-        email = enrichment.get('EMAIL') or contact.get('email')
-        linkedin_url = enrichment.get('LINKEDIN_URL') or contact.get('linkedin_url') or contact.get('linkedin')
+        # Support both uppercase (old prompts) and lowercase (new prompts) field names
+        first_name = (
+            enrichment.get('FIRST_NAME') or enrichment.get('first_name') or
+            contact.get('first_name') or
+            (contact_name.split()[0] if contact_name else '')
+        )
+        last_name = (
+            enrichment.get('LAST_NAME') or enrichment.get('last_name') or
+            contact.get('last_name') or
+            (contact_name.split()[-1] if contact_name and len(contact_name.split()) > 1 else '')
+        )
+        email = (
+            enrichment.get('EMAIL') or enrichment.get('email') or
+            contact.get('email')
+        )
+        linkedin_url = (
+            enrichment.get('LINKEDIN_URL') or enrichment.get('linkedin_url') or
+            contact.get('linkedin_url') or contact.get('linkedin')
+        )
+        phone = (
+            enrichment.get('PHONE') or enrichment.get('phone') or
+            contact.get('phone')
+        )
 
         # Build rich bio from multiple sources
         bio_parts = []
         if contact.get('why_they_matter'):
             bio_parts.append(contact['why_they_matter'])
-        if enrichment.get('LINKEDIN_SUMMARY'):
-            bio_parts.append(enrichment['LINKEDIN_SUMMARY'])
-        if enrichment.get('WEB_SUMMARY'):
-            bio_parts.append(enrichment['WEB_SUMMARY'])
+        if enrichment.get('LINKEDIN_SUMMARY') or enrichment.get('linkedin_summary'):
+            bio_parts.append(enrichment.get('LINKEDIN_SUMMARY') or enrichment.get('linkedin_summary'))
+        if enrichment.get('WEB_SUMMARY') or enrichment.get('web_summary'):
+            bio_parts.append(enrichment.get('WEB_SUMMARY') or enrichment.get('web_summary'))
         bio_paragraph = ' '.join(bio_parts) if bio_parts else contact.get('bio_paragraph', '')
 
         # Store ALL enrichment data in JSONB column (nothing lost!)
+        # Support both uppercase and lowercase field names
         enrichment_data = {
             # From 6_ENRICH_CONTACTS (base contact info)
             'role_in_project': contact.get('role_in_project'),
             'why_they_matter': contact.get('why_they_matter'),
             'notes': contact.get('notes'),
             'confidence': contact.get('confidence'),
-            # From 6_ENRICH_CONTACT_INDIVIDUAL (rich enrichment)
-            'signal_relevance': enrichment.get('SIGNAL_RELEVANCE'),
-            'interesting_facts': enrichment.get('INTERESTING_FACTS', []),
-            'linkedin_summary': enrichment.get('LINKEDIN_SUMMARY'),
-            'web_summary': enrichment.get('WEB_SUMMARY'),
-            'email_confidence': enrichment.get('EMAIL_CONFIDENCE'),
-            'email_source': enrichment.get('EMAIL_SOURCE'),
-            'linkedin_source': enrichment.get('LINKEDIN_SOURCE'),
+            # From 6_ENRICH_CONTACT_INDIVIDUAL (rich enrichment) - try both cases
+            'signal_relevance': enrichment.get('SIGNAL_RELEVANCE') or enrichment.get('signal_relevance'),
+            'interesting_facts': enrichment.get('INTERESTING_FACTS') or enrichment.get('interesting_facts', []),
+            'linkedin_summary': enrichment.get('LINKEDIN_SUMMARY') or enrichment.get('linkedin_summary'),
+            'web_summary': enrichment.get('WEB_SUMMARY') or enrichment.get('web_summary'),
+            'email_confidence': enrichment.get('EMAIL_CONFIDENCE') or enrichment.get('email_confidence'),
+            'email_source': enrichment.get('EMAIL_SOURCE') or enrichment.get('email_source'),
+            'linkedin_source': enrichment.get('LINKEDIN_SOURCE') or enrichment.get('linkedin_source'),
         }
         # Remove None values to keep it clean
         enrichment_data = {k: v for k, v in enrichment_data.items() if v is not None}
@@ -2059,7 +2082,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             'last_name': last_name,
             'title': contact.get('title') or contact.get('role'),
             'email': email,
-            'phone': contact.get('phone'),
+            'phone': phone,
             'linkedin_url': linkedin_url,
             'bio_paragraph': bio_paragraph,
             'is_primary': idx == 0,  # First contact is primary
