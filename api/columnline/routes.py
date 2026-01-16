@@ -2164,6 +2164,96 @@ async def delete_production_dossier(dossier_id: str):
 
 
 # ============================================================================
+# DEBUG DUMP ENDPOINT
+# ============================================================================
+
+@router.get("/debug/{run_id}")
+async def debug_dump(run_id: str):
+    """
+    Get a complete debug dump of everything for a run.
+
+    Returns ALL data from v2 pipeline AND production tables.
+    Use this after /publish to verify what was generated vs stored.
+
+    Usage:
+        GET /columnline/debug/RUN_20260116_004445
+    """
+    dump = {
+        "run_id": run_id,
+        "generated_at": datetime.now().isoformat(),
+
+        # V2 Pipeline Data
+        "v2": {
+            "run": None,
+            "pipeline_steps": [],
+            "contacts": []
+        },
+
+        # Production Data (after publish)
+        "production": {
+            "dossier": None,
+            "contacts": [],
+            "batch": None
+        },
+
+        # Summary
+        "summary": {
+            "status": None,
+            "published": False,
+            "production_dossier_id": None,
+            "v2_steps_completed": 0,
+            "v2_contacts_created": 0,
+            "production_contacts_created": 0
+        }
+    }
+
+    # 1. Get v2 run
+    run = repo.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    dump["v2"]["run"] = run
+    dump["summary"]["status"] = run.get("status")
+
+    # 2. Get all v2 pipeline steps with full output
+    steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).order('started_at').execute()
+    dump["v2"]["pipeline_steps"] = steps.data
+    dump["summary"]["v2_steps_completed"] = len([s for s in steps.data if s.get('status') == 'completed'])
+
+    # 3. Get v2 contacts (observability)
+    v2_contacts = repo.get_contacts(run_id)
+    dump["v2"]["contacts"] = v2_contacts
+    dump["summary"]["v2_contacts_created"] = len(v2_contacts)
+
+    # 4. Check if published - look for production_dossier_id in seed_data
+    seed_data = run.get('seed_data') or {}
+    production_dossier_id = seed_data.get('_production_dossier_id')
+
+    if production_dossier_id:
+        dump["summary"]["published"] = True
+        dump["summary"]["production_dossier_id"] = production_dossier_id
+
+        # 5. Get production dossier
+        prod_dossier = repo.client.table('dossiers').select('*').eq('id', production_dossier_id).execute()
+        if prod_dossier.data:
+            dump["production"]["dossier"] = prod_dossier.data[0]
+
+            # 6. Get production batch
+            batch_id = prod_dossier.data[0].get('batch_id')
+            if batch_id:
+                batch = repo.client.table('batches').select('*').eq('id', batch_id).execute()
+                if batch.data:
+                    dump["production"]["batch"] = batch.data[0]
+
+        # 7. Get production contacts
+        prod_contacts = repo.client.table('contacts').select('*').eq('dossier_id', production_dossier_id).execute()
+        dump["production"]["contacts"] = prod_contacts.data
+        dump["summary"]["production_contacts_created"] = len(prod_contacts.data)
+
+    return dump
+
+
+# ============================================================================
 # PREP INPUTS (COMPRESSION) ENDPOINTS
 # ============================================================================
 
