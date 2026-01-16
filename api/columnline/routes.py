@@ -1732,25 +1732,34 @@ def get_or_create_v2_batch(production_client_id: str) -> dict:
 
 def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
     """Assemble find_lead JSONB from writer outputs."""
-    find_lead = {}
+    find_lead = {
+        'one_liner': '',
+        'the_angle': '',
+        'score_explanation': '',
+        'lead_score': 0,
+        'timing_urgency': 'MEDIUM',
+        'primary_buying_signal': {},
+        'company_snapshot': {},
+        'company_name': ''
+    }
 
     # From WRITER_INTRO (10_WRITER_INTRO)
     intro_output = step_outputs.get('10_WRITER_INTRO', {})
     if intro_output:
         clean = extract_clean_content(intro_output.get('output', {}))
         if isinstance(clean, dict):
-            find_lead['one_liner'] = clean.get('one_liner', '')
-            find_lead['the_angle'] = clean.get('the_angle', '')
-            find_lead['score_explanation'] = clean.get('score_explanation', '')
-            find_lead['lead_score'] = clean.get('lead_score', 0)
+            find_lead['one_liner'] = clean.get('one_liner') or ''
+            find_lead['the_angle'] = clean.get('the_angle') or ''
+            find_lead['score_explanation'] = clean.get('score_explanation') or ''
+            find_lead['lead_score'] = clean.get('lead_score') or 0
 
     # From WRITER_SIGNALS (10_WRITER_SIGNALS)
     signals_output = step_outputs.get('10_WRITER_SIGNALS', {})
     if signals_output:
         clean = extract_clean_content(signals_output.get('output', {}))
         if isinstance(clean, dict):
-            find_lead['timing_urgency'] = clean.get('timing_urgency', 'MEDIUM')
-            find_lead['primary_buying_signal'] = clean.get('primary_buying_signal', {})
+            find_lead['timing_urgency'] = clean.get('timing_urgency') or 'MEDIUM'
+            find_lead['primary_buying_signal'] = clean.get('primary_buying_signal') or {}
             # Additional signals go to enrich_lead
 
     # From WRITER_OPPORTUNITY (10_WRITER_OPPORTUNITY)
@@ -1758,64 +1767,78 @@ def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
     if opp_output:
         clean = extract_clean_content(opp_output.get('output', {}))
         if isinstance(clean, dict):
-            find_lead['company_snapshot'] = clean.get('company_snapshot', {})
+            find_lead['company_snapshot'] = clean.get('company_snapshot') or {}
 
     # Add company_name from seed
     if seed_data:
-        find_lead['company_name'] = seed_data.get('company_name', seed_data.get('name', ''))
+        find_lead['company_name'] = seed_data.get('company_name') or seed_data.get('name') or ''
 
     return find_lead
 
 
 def assemble_enrich_lead(step_outputs: dict) -> dict:
     """Assemble enrich_lead JSONB from writer outputs."""
-    enrich_lead = {}
+    enrich_lead = {
+        'company_deep_dive': {},
+        'network_intelligence': {},
+        'project_sites': [],
+        'additional_signals': []
+    }
 
     # From WRITER_LEAD_INTELLIGENCE (10_WRITER_LEAD_INTELLIGENCE)
     intel_output = step_outputs.get('10_WRITER_LEAD_INTELLIGENCE', {})
     if intel_output:
         clean = extract_clean_content(intel_output.get('output', {}))
         if isinstance(clean, dict):
-            enrich_lead['company_deep_dive'] = clean.get('company_deep_dive', {})
-            enrich_lead['network_intelligence'] = clean.get('network_intelligence', {})
+            enrich_lead['company_deep_dive'] = clean.get('company_deep_dive') or {}
+            enrich_lead['network_intelligence'] = clean.get('network_intelligence') or {}
 
     # From WRITER_OPPORTUNITY (10_WRITER_OPPORTUNITY) - project_sites
     opp_output = step_outputs.get('10_WRITER_OPPORTUNITY', {})
     if opp_output:
         clean = extract_clean_content(opp_output.get('output', {}))
         if isinstance(clean, dict):
-            enrich_lead['project_sites'] = clean.get('project_sites', [])
+            enrich_lead['project_sites'] = clean.get('project_sites') or []
 
     # From WRITER_SIGNALS (10_WRITER_SIGNALS) - additional_signals
     signals_output = step_outputs.get('10_WRITER_SIGNALS', {})
     if signals_output:
         clean = extract_clean_content(signals_output.get('output', {}))
         if isinstance(clean, dict):
-            enrich_lead['additional_signals'] = clean.get('additional_signals', [])
+            enrich_lead['additional_signals'] = clean.get('additional_signals') or []
 
     return enrich_lead
 
 
 def assemble_insight(step_outputs: dict) -> dict:
     """Assemble insight JSONB from WRITER_STRATEGY output."""
-    insight = {}
+    insight = {
+        'the_math': {},
+        'deal_strategy': {},
+        'competitive_positioning': {},
+        'decision_making_process': {},
+        'sources': []
+    }
 
     # From WRITER_STRATEGY (10_WRITER_STRATEGY)
     strategy_output = step_outputs.get('10_WRITER_STRATEGY', {})
     if strategy_output:
         clean = extract_clean_content(strategy_output.get('output', {}))
         if isinstance(clean, dict):
-            insight['the_math'] = clean.get('the_math', {})
-            insight['deal_strategy'] = clean.get('deal_strategy', {})
-            insight['competitive_positioning'] = clean.get('competitive_positioning', {})
-            insight['decision_making_process'] = clean.get('decision_making_process', {})
+            insight['the_math'] = clean.get('the_math') or {}
+            insight['deal_strategy'] = clean.get('deal_strategy') or {}
+            insight['competitive_positioning'] = clean.get('competitive_positioning') or {}
+            insight['decision_making_process'] = clean.get('decision_making_process') or {}
 
     # Collect sources from all steps
     sources = []
     for step_name, step_data in step_outputs.items():
-        clean = extract_clean_content(step_data.get('output', {}))
-        if isinstance(clean, dict) and 'sources' in clean:
-            sources.extend(clean['sources'])
+        if isinstance(step_data, dict):
+            clean = extract_clean_content(step_data.get('output', {}))
+            if isinstance(clean, dict) and clean.get('sources'):
+                step_sources = clean['sources']
+                if isinstance(step_sources, list):
+                    sources.extend(step_sources)
     insight['sources'] = sources
 
     return insight
@@ -1837,8 +1860,8 @@ def assemble_copy(step_outputs: dict, contact_id_map: dict) -> dict:
     if strategy_output:
         clean = extract_clean_content(strategy_output.get('output', {}))
         if isinstance(clean, dict):
-            copy_data['objections'] = clean.get('objections', [])
-            copy_data['conversation_starters'] = clean.get('conversation_starters', [])
+            copy_data['objections'] = clean.get('objections') or []
+            copy_data['conversation_starters'] = clean.get('conversation_starters') or []
 
     # Outreach is built per-contact during contact insertion
     # The contact_id_map will be populated with production UUIDs
@@ -1848,15 +1871,25 @@ def assemble_copy(step_outputs: dict, contact_id_map: dict) -> dict:
 
 def assemble_media(step_outputs: dict) -> dict:
     """Assemble media JSONB from 8_MEDIA output."""
-    media = {}
+    media = {
+        'logo_url': '',
+        'logo_fallback_chain': [],
+        'project_images': []
+    }
 
     media_output = step_outputs.get('8_MEDIA', {})
     if media_output:
         clean = extract_clean_content(media_output.get('output', {}))
         if isinstance(clean, dict):
-            media['logo_url'] = clean.get('logo_url', '')
-            media['logo_fallback_chain'] = clean.get('logo_fallback_chain', [])
-            media['project_images'] = clean.get('project_images', clean.get('recommended_project_images', []))
+            media['logo_url'] = clean.get('logo_url') or ''
+            media['logo_fallback_chain'] = clean.get('logo_fallback_chain') or []
+            # Try multiple field names for project images
+            media['project_images'] = (
+                clean.get('project_images') or
+                clean.get('recommended_project_images') or
+                clean.get('image_assets') or
+                []
+            )
 
     return media
 
@@ -1919,6 +1952,20 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
     for step in steps.data:
         step_outputs[step['step_name']] = step
 
+    # Validate we have minimum required outputs
+    required_writers = ['10_WRITER_INTRO', '10_WRITER_SIGNALS']  # At minimum need these
+    missing_writers = [w for w in required_writers if w not in step_outputs]
+    if missing_writers:
+        # Check if we have any writer outputs at all
+        writer_steps = [s for s in step_outputs.keys() if s.startswith('10_WRITER')]
+        if not writer_steps:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No writer outputs found for run {run_id}. Run the writers first before publishing."
+            )
+        # Log warning but continue - may have partial data
+        print(f"Warning: Missing some writer outputs for {run_id}: {missing_writers}")
+
     # 5. Get seed data
     seed_data = run.get('seed_data', {})
 
@@ -1951,38 +1998,65 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
         if not isinstance(contact, dict):
             continue
 
+        # Build contact name - prefer 'name' field, fall back to first+last
+        contact_name = contact.get('name', '')
+        if not contact_name:
+            first = contact.get('first_name', '') or ''
+            last = contact.get('last_name', '') or ''
+            contact_name = f"{first} {last}".strip()
+        if not contact_name:
+            contact_name = 'Unknown Contact'
+
         contact_data = {
             'dossier_id': production_dossier_id,
-            'name': contact.get('name', f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip()),
+            'name': contact_name,
             'first_name': contact.get('first_name'),
             'last_name': contact.get('last_name'),
-            'title': contact.get('title', contact.get('role')),
+            'title': contact.get('title') or contact.get('role'),
             'email': contact.get('email'),
             'phone': contact.get('phone'),
-            'linkedin_url': contact.get('linkedin_url', contact.get('linkedin')),
-            'bio_paragraph': contact.get('bio_paragraph', contact.get('bio', contact.get('why_they_matter', ''))),
+            'linkedin_url': contact.get('linkedin_url') or contact.get('linkedin'),
+            'bio_paragraph': contact.get('bio_paragraph') or contact.get('bio') or contact.get('why_they_matter', ''),
             'is_primary': idx == 0,  # First contact is primary
-            'source': contact.get('source', 'research'),
+            'source': contact.get('source', 'v2_pipeline'),
             'created_at': datetime.now().isoformat()
         }
 
         # Insert contact
-        result = repo.client.table('contacts').insert(contact_data).execute()
-        if result.data:
-            prod_contact_id = result.data[0]['id']
-            contact_id_map[idx] = prod_contact_id
-            contacts_created += 1
+        try:
+            result = repo.client.table('contacts').insert(contact_data).execute()
+            if result.data:
+                prod_contact_id = result.data[0]['id']
+                contact_id_map[idx] = prod_contact_id
+                contacts_created += 1
 
-            # Build outreach entry for this contact
-            outreach_entry = {
-                'contact_id': prod_contact_id,
-                'target_name': contact_data['name'],
-                'target_title': contact_data['title'] or '',
-                'email_subject': contact.get('email_subject', contact.get('email_copy', {}).get('subject', '')),
-                'email_body': contact.get('email_body', contact.get('email_copy', {}).get('body', '')),
-                'linkedin_message': contact.get('linkedin_message', contact.get('linkedin_copy', ''))
-            }
-            outreach_list.append(outreach_entry)
+                # Build outreach entry for this contact
+                # Handle various formats for email/linkedin copy
+                email_copy = contact.get('email_copy', {})
+                if isinstance(email_copy, str):
+                    email_subject = ''
+                    email_body = email_copy
+                else:
+                    email_subject = contact.get('email_subject') or email_copy.get('subject', '')
+                    email_body = contact.get('email_body') or email_copy.get('body', '')
+
+                linkedin_copy = contact.get('linkedin_copy', '')
+                if isinstance(linkedin_copy, dict):
+                    linkedin_message = linkedin_copy.get('message', '')
+                else:
+                    linkedin_message = contact.get('linkedin_message') or linkedin_copy
+
+                outreach_entry = {
+                    'contact_id': str(prod_contact_id),
+                    'target_name': contact_name,
+                    'target_title': contact_data['title'] or '',
+                    'email_subject': email_subject,
+                    'email_body': email_body,
+                    'linkedin_message': linkedin_message
+                }
+                outreach_list.append(outreach_entry)
+        except Exception as e:
+            print(f"Warning: Failed to insert contact {contact_name}: {e}")
 
     # 8. Assemble copy with contact IDs
     copy_data = assemble_copy(step_outputs, contact_id_map)
@@ -2030,9 +2104,11 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
         'completed_dossiers': batch.get('completed_dossiers', 0) + 1
     }).eq('id', batch['id']).execute()
 
-    # 12. Update v2 run with production dossier ID
+    # 12. Update v2 run status (store production_dossier_id in seed_data for reference)
+    current_seed = run.get('seed_data') or {}
+    current_seed['_production_dossier_id'] = production_dossier_id
     repo.update_run(run_id, {
-        'production_dossier_id': production_dossier_id,
+        'seed_data': current_seed,
         'status': 'published'
     })
 
