@@ -1628,9 +1628,13 @@ def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
         if isinstance(clean, dict):
             find_lead['timing_urgency'] = clean.get('timing_urgency') or 'MEDIUM'
             pbs = clean.get('primary_buying_signal') or {}
-            # Normalize: frontend expects 'signal' key, V2 produces 'signal_type'
+            # Transform V2 field names to V1 expected names:
+            # - signal_type -> signal
+            # - source_tier -> source_name
             if pbs.get('signal_type') and not pbs.get('signal'):
                 pbs['signal'] = pbs['signal_type']
+            if pbs.get('source_tier') and not pbs.get('source_name'):
+                pbs['source_name'] = pbs['source_tier']
             find_lead['primary_buying_signal'] = pbs
             # Additional signals go to enrich_lead
 
@@ -1641,9 +1645,15 @@ def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
         if isinstance(clean, dict):
             find_lead['company_snapshot'] = clean.get('company_snapshot') or {}
 
-    # Add company_name from seed
-    if seed_data:
-        find_lead['company_name'] = seed_data.get('company_name') or seed_data.get('name') or ''
+    # Get company_name - prefer company_snapshot, fall back to seed_data
+    company_snapshot = find_lead.get('company_snapshot', {})
+    find_lead['company_name'] = (
+        company_snapshot.get('company_name') or
+        company_snapshot.get('name') or
+        (seed_data.get('company_name') if seed_data else None) or
+        (seed_data.get('name') if seed_data else None) or
+        ''
+    )
 
     return find_lead
 
