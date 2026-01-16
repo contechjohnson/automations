@@ -1627,7 +1627,11 @@ def assemble_find_lead(step_outputs: dict, seed_data: dict) -> dict:
         clean = extract_clean_content(signals_output.get('output', {}))
         if isinstance(clean, dict):
             find_lead['timing_urgency'] = clean.get('timing_urgency') or 'MEDIUM'
-            find_lead['primary_buying_signal'] = clean.get('primary_buying_signal') or {}
+            pbs = clean.get('primary_buying_signal') or {}
+            # Normalize: frontend expects 'signal' key, V2 produces 'signal_type'
+            if pbs.get('signal_type') and not pbs.get('signal'):
+                pbs['signal'] = pbs['signal_type']
+            find_lead['primary_buying_signal'] = pbs
             # Additional signals go to enrich_lead
 
     # From WRITER_OPPORTUNITY (10_WRITER_OPPORTUNITY)
