@@ -1887,6 +1887,41 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                 individual_enrichments[contact_name.lower()] = enrichment
                 print(f"  Found enrichment for: {contact_name}")
 
+    # Get copy data from 10A_COPY and 10B_COPY_CLIENT_OVERRIDE steps
+    # Query directly since multiple steps share the same step_name
+    contact_copy_data = {}
+    copy_steps = repo.client.table('v2_pipeline_steps').select('output').eq(
+        'run_id', run_id
+    ).eq('step_name', '10A_COPY').eq('status', 'completed').execute()
+
+    for step in copy_steps.data:
+        copy_output = extract_clean_content(step.get('output', {}))
+        if isinstance(copy_output, dict):
+            copy_outputs = copy_output.get('copy_outputs', [])
+            for copy_item in copy_outputs:
+                if isinstance(copy_item, dict):
+                    contact_name = copy_item.get('contact_name', '')
+                    if contact_name:
+                        contact_copy_data[contact_name.lower()] = copy_item
+                        print(f"  Found copy for: {contact_name}")
+
+    # Also check for client override copy (takes precedence)
+    override_steps = repo.client.table('v2_pipeline_steps').select('output').eq(
+        'run_id', run_id
+    ).eq('step_name', '10B_COPY_CLIENT_OVERRIDE').eq('status', 'completed').execute()
+
+    for step in override_steps.data:
+        copy_output = extract_clean_content(step.get('output', {}))
+        if isinstance(copy_output, dict):
+            copy_outputs = copy_output.get('copy_outputs', copy_output.get('override_copy', []))
+            for copy_item in copy_outputs:
+                if isinstance(copy_item, dict):
+                    contact_name = copy_item.get('contact_name', '')
+                    if contact_name:
+                        # Override existing copy with client-specific version
+                        contact_copy_data[contact_name.lower()] = copy_item
+                        print(f"  Found client override copy for: {contact_name}")
+
     # Generate production dossier ID
     production_dossier_id = str(uuid.uuid4())
 
@@ -2071,20 +2106,29 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                     print(f"Warning: Failed to write v2_contact for {contact_name}: {v2_err}")
 
                 # Build outreach entry for this contact
-                # Handle various formats for email/linkedin copy
-                email_copy = contact.get('email_copy', {})
-                if isinstance(email_copy, str):
-                    email_subject = ''
-                    email_body = email_copy
-                else:
-                    email_subject = contact.get('email_subject') or email_copy.get('subject', '')
-                    email_body = contact.get('email_body') or email_copy.get('body', '')
+                # First check contact_copy_data (from 10A_COPY / 10B_COPY_CLIENT_OVERRIDE)
+                copy_info = contact_copy_data.get(contact_name.lower(), {})
 
-                linkedin_copy = contact.get('linkedin_copy', '')
-                if isinstance(linkedin_copy, dict):
-                    linkedin_message = linkedin_copy.get('message', '')
-                else:
-                    linkedin_message = contact.get('linkedin_message') or linkedin_copy
+                # Get email copy - prefer copy_info from 10A_COPY steps
+                email_subject = copy_info.get('email_subject', '')
+                email_body = copy_info.get('email_body', '')
+                linkedin_message = copy_info.get('linkedin_message', copy_info.get('linkedin_copy', ''))
+
+                # Fall back to contact fields if no copy found
+                if not email_body:
+                    email_copy = contact.get('email_copy', {})
+                    if isinstance(email_copy, str):
+                        email_body = email_copy
+                    else:
+                        email_subject = email_subject or contact.get('email_subject') or email_copy.get('subject', '')
+                        email_body = contact.get('email_body') or email_copy.get('body', '')
+
+                if not linkedin_message:
+                    linkedin_copy = contact.get('linkedin_copy', '')
+                    if isinstance(linkedin_copy, dict):
+                        linkedin_message = linkedin_copy.get('message', '')
+                    else:
+                        linkedin_message = contact.get('linkedin_message') or linkedin_copy
 
                 outreach_entry = {
                     'contact_id': str(prod_contact_id),
