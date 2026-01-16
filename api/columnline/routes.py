@@ -1966,8 +1966,8 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
         # Log warning but continue - may have partial data
         print(f"Warning: Missing some writer outputs for {run_id}: {missing_writers}")
 
-    # 5. Get seed data
-    seed_data = run.get('seed_data', {})
+    # 5. Get seed data (handle None explicitly)
+    seed_data = run.get('seed_data') or {}
 
     # 6. Assemble JSONB columns
     find_lead = assemble_find_lead(step_outputs, seed_data)
@@ -2070,8 +2070,22 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
         released_at = datetime.now().isoformat()
 
     # 10. Insert dossier into production table
-    company_name = seed_data.get('company_name', seed_data.get('name', find_lead.get('company_name', 'Unknown')))
-    company_domain = seed_data.get('domain', seed_data.get('company_domain', find_lead.get('company_snapshot', {}).get('domain')))
+    # Get company_name from multiple sources (required field, can't be empty)
+    company_name = (
+        seed_data.get('company_name') or
+        seed_data.get('name') or
+        seed_data.get('company') or
+        find_lead.get('company_name') or
+        find_lead.get('company_snapshot', {}).get('name') or
+        # Try to extract from contacts
+        (contacts_list[0].get('company') if contacts_list else None) or
+        f"Dossier_{run_id}"  # Last resort fallback
+    )
+    company_domain = (
+        seed_data.get('domain') or
+        seed_data.get('company_domain') or
+        find_lead.get('company_snapshot', {}).get('domain')
+    )
 
     dossier_data = {
         'id': production_dossier_id,
