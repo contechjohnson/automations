@@ -2034,7 +2034,17 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         find_lead.get('company_snapshot', {}).get('domain')
     )
 
-    # 11. INSERT DOSSIER FIRST (before contacts, to satisfy FK constraint)
+    # 11. CHECK FOR EXISTING DOSSIER (unique constraint on client_id + company_domain)
+    existing_dossier = None
+    if company_domain:
+        existing_check = repo.client.table('dossiers').select('id').eq(
+            'client_id', production_client_id
+        ).eq('company_domain', company_domain).execute()
+        if existing_check.data:
+            existing_dossier = existing_check.data[0]
+            production_dossier_id = existing_dossier['id']
+            print(f"Found existing dossier {production_dossier_id} for {company_domain}, will update")
+
     dossier_data = {
         'id': production_dossier_id,
         'client_id': production_client_id,
@@ -2054,11 +2064,18 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'agents_completed': ['find-lead', 'enrich-contacts', 'enrich-lead', 'write-copy', 'insight', 'enrich-media'],
         'release_date': release_date,
         'released_at': released_at,
-        'created_at': datetime.now().isoformat(),
         'updated_at': datetime.now().isoformat()
     }
 
-    repo.client.table('dossiers').insert(dossier_data).execute()
+    if existing_dossier:
+        # Update existing dossier
+        repo.client.table('dossiers').update(dossier_data).eq('id', production_dossier_id).execute()
+        # Delete existing contacts for this dossier (will re-create fresh)
+        repo.client.table('contacts').delete().eq('dossier_id', production_dossier_id).execute()
+    else:
+        # Insert new dossier
+        dossier_data['created_at'] = datetime.now().isoformat()
+        repo.client.table('dossiers').insert(dossier_data).execute()
 
     # 12. NOW insert contacts (dossier exists, FK constraint satisfied)
     outreach_list = []
@@ -2131,11 +2148,12 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         copy_data['outreach'] = outreach_list
         repo.client.table('dossiers').update({'copy': copy_data}).eq('id', production_dossier_id).execute()
 
-    # 11. Update batch counts
-    repo.client.table('batches').update({
-        'total_dossiers': batch.get('total_dossiers', 0) + 1,
-        'completed_dossiers': batch.get('completed_dossiers', 0) + 1
-    }).eq('id', batch['id']).execute()
+    # 14. Update batch counts (only if new dossier, not update)
+    if not existing_dossier:
+        repo.client.table('batches').update({
+            'total_dossiers': batch.get('total_dossiers', 0) + 1,
+            'completed_dossiers': batch.get('completed_dossiers', 0) + 1
+        }).eq('id', batch['id']).execute()
 
     # 12. Update v2 run status (store production_dossier_id in seed_data for reference)
     current_seed = run.get('seed_data') or {}
