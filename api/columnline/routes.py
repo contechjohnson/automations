@@ -736,6 +736,33 @@ async def prepare_steps(request: StepPrepareRequest):
             all_claims = fetch_all_individual_claims(repo, request.run_id)
             step_input.update(all_claims)
 
+        # Dossier Composer needs ALL research narratives (not claims)
+        if step_name == "11_DOSSIER_COMPOSER":
+            # Fetch all research narratives directly
+            signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal:
+                step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
+
+            entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity:
+                step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+            contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+            if contacts:
+                step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+            # Enrichment outputs + Insight
+            for step, key in [
+                ("5A_ENRICH_LEAD", "enrich_lead_output"),
+                ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+                ("5C_CLIENT_SPECIFIC", "client_specific_output"),
+                ("07B_INSIGHT", "insight_output"),
+                ("6_ENRICH_CONTACTS", "enriched_contacts")
+            ]:
+                output = repo.get_completed_step(request.run_id, step)
+                if output:
+                    step_input[key] = extract_clean_content(output.get('output'))
+
         # Merge Claims needs ALL claims including insight claims
         if step_name == "MERGE_CLAIMS":
             # Find all completed claims extraction steps
@@ -1927,19 +1954,24 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     for step in steps.data:
         step_outputs[step['step_name']] = step
 
-    # Validate we have minimum required outputs
+    # Validate we have minimum required outputs (either composers OR writers)
+    has_composer = '11_DOSSIER_COMPOSER' in step_outputs
     required_writers = ['10_WRITER_INTRO', '10_WRITER_SIGNALS']  # At minimum need these
     missing_writers = [w for w in required_writers if w not in step_outputs]
-    if missing_writers:
+
+    if not has_composer and missing_writers:
         # Check if we have any writer outputs at all
         writer_steps = [s for s in step_outputs.keys() if s.startswith('10_WRITER')]
         if not writer_steps:
             raise HTTPException(
                 status_code=400,
-                detail=f"No writer outputs found for run {run_id}. Run the writers first before publishing."
+                detail=f"No writer or composer outputs found for run {run_id}. Run 11_DOSSIER_COMPOSER or writers first."
             )
         # Log warning but continue - may have partial data
         print(f"Warning: Missing some writer outputs for {run_id}: {missing_writers}")
+
+    if has_composer:
+        print(f"Using 11_DOSSIER_COMPOSER for dossier assembly (dynamic sections)")
 
     # 5. Get seed data (handle None explicitly)
     seed_data = run.get('seed_data') or {}
@@ -1949,6 +1981,28 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     enrich_lead = assemble_enrich_lead(step_outputs)
     insight_data = assemble_insight(step_outputs)
     media_data = assemble_media(step_outputs)
+
+    # 6b. Extract sections from Dossier Composer (if available)
+    sections = None
+    composer_metadata = {}
+    composer_step = step_outputs.get('11_DOSSIER_COMPOSER', {})
+    if composer_step:
+        composer_output = extract_clean_content(composer_step.get('output', {}))
+        if isinstance(composer_output, dict):
+            sections = composer_output.get('sections', [])
+            composer_metadata = composer_output.get('metadata', {})
+            print(f"  Extracted {len(sections) if sections else 0} sections from composer")
+
+            # Override find_lead fields from composer metadata (if available)
+            if composer_metadata:
+                if composer_metadata.get('lead_score'):
+                    find_lead['lead_score'] = composer_metadata['lead_score']
+                if composer_metadata.get('timing_urgency'):
+                    find_lead['timing_urgency'] = composer_metadata['timing_urgency']
+                if composer_metadata.get('primary_signal'):
+                    find_lead['primary_buying_signal'] = {'signal': composer_metadata['primary_signal']}
+                if composer_metadata.get('company_name'):
+                    find_lead['company_name'] = composer_metadata['company_name']
 
     # 7. Insert contacts and build ID map
     contact_id_map = {}
@@ -2069,6 +2123,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'copy': copy_data,  # Initial copy without outreach - will update after contacts
         'insight': insight_data,
         'media': media_data,
+        'sections': sections,  # Dynamic sections from 11_DOSSIER_COMPOSER (null for legacy dossiers)
         'lead_score': find_lead.get('lead_score', 0),
         'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
         'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
