@@ -2602,7 +2602,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         seed_data.get('name') or
         seed_data.get('company') or
         find_lead.get('company_name') or
-        find_lead.get('company_snapshot', {}).get('name') or
+        (find_lead.get('company_snapshot') or {}).get('name') or
         # Try to extract from contacts
         (contacts_list[0].get('company') if contacts_list else None) or
         f"Dossier_{run_id}"  # Last resort fallback
@@ -2610,7 +2610,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     company_domain = (
         seed_data.get('domain') or
         seed_data.get('company_domain') or
-        find_lead.get('company_snapshot', {}).get('domain')
+        (find_lead.get('company_snapshot') or {}).get('domain')
     )
 
     # 11. CHECK FOR EXISTING DOSSIER (unique constraint on client_id + company_domain)
@@ -2638,7 +2638,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'sections': sections,  # Dynamic sections from 11_DOSSIER_COMPOSER (null for legacy dossiers)
         'lead_score': find_lead.get('lead_score', 0),
         'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
-        'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
+        'primary_signal': (find_lead.get('primary_buying_signal') or {}).get('signal', ''),
         'status': 'ready',
         'pipeline_version': 'v2',
         'agents_completed': ['find-lead', 'enrich-contacts', 'enrich-lead', 'write-copy', 'insight', 'enrich-media'],
