@@ -690,19 +690,65 @@ async def prepare_steps(request: StepPrepareRequest):
             all_claims = fetch_all_individual_claims(repo, request.run_id)
             step_input.update(all_claims)
 
-        # Enrich Contacts needs context pack from 7B + ALL individual claims
+        # Enrich Contacts needs ALL research narratives (V2 pipeline)
+        # CRITICAL: contact_discovery_narrative contains the key_contacts to extract from!
         if step_name == "6_ENRICH_CONTACTS":
+            # Fetch all research narratives up to this point
+            signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal:
+                step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
+
+            entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity:
+                step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+            # CRITICAL: This contains key_contacts from contact discovery research!
+            contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+            if contacts:
+                step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+            # Enrichment outputs that may exist at this point
+            for step, key in [
+                ("5A_ENRICH_LEAD", "enrich_lead_output"),
+                ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+                ("5C_CLIENT_SPECIFIC", "client_specific_output"),
+            ]:
+                output = repo.get_completed_step(request.run_id, step)
+                if output:
+                    step_input[key] = extract_clean_content(output.get('output'))
+
+            # Backwards compatibility: still try old claims method
             context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
-
-            # Pass ALL individual claims (not merged - merged was bottleneck with only 24 claims)
             all_claims = fetch_all_individual_claims(repo, request.run_id)
             step_input.update(all_claims)
 
-        # Individual contact enrichment needs ALL individual claims (contact_data passed by Make.com)
+        # Individual contact enrichment needs ALL research narratives (V2 pipeline)
         if step_name == "6_ENRICH_CONTACT_INDIVIDUAL":
-            # Pass ALL individual claims (not merged)
+            # Fetch all research narratives for context
+            signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal:
+                step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
+
+            entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity:
+                step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+            contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+            if contacts:
+                step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+            # Enrichment outputs for context
+            for step, key in [
+                ("5A_ENRICH_LEAD", "enrich_lead_output"),
+                ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+            ]:
+                output = repo.get_completed_step(request.run_id, step)
+                if output:
+                    step_input[key] = extract_clean_content(output.get('output'))
+
+            # Backwards compatibility
             all_claims = fetch_all_individual_claims(repo, request.run_id)
             step_input.update(all_claims)
 
@@ -1292,6 +1338,55 @@ async def transition_step(request: StepTransitionRequest):
         # Client override copy needs the base copy (just completed)
         if request.completed_step_name == "10A_COPY":
             step_input["base_copy"] = clean_output
+
+    if request.next_step_name == "6_ENRICH_CONTACTS":
+        # Enrich contacts needs ALL research narratives (V2 pipeline)
+        # CRITICAL: contact_discovery_narrative contains the key_contacts!
+        signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+        if signal:
+            step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
+
+        entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+        if entity:
+            step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+        # CRITICAL: This contains key_contacts from contact discovery research!
+        contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+        if contacts:
+            step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+        # Enrichment outputs that may exist at this point
+        for step, key in [
+            ("5A_ENRICH_LEAD", "enrich_lead_output"),
+            ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+            ("5C_CLIENT_SPECIFIC", "client_specific_output"),
+        ]:
+            output = repo.get_completed_step(request.run_id, step)
+            if output:
+                step_input[key] = extract_clean_content(output.get('output'))
+
+    if request.next_step_name == "6_ENRICH_CONTACT_INDIVIDUAL":
+        # Individual contact enrichment needs ALL research narratives (V2 pipeline)
+        signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+        if signal:
+            step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
+
+        entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+        if entity:
+            step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+        contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+        if contacts:
+            step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+        # Enrichment outputs for context
+        for step, key in [
+            ("5A_ENRICH_LEAD", "enrich_lead_output"),
+            ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+        ]:
+            output = repo.get_completed_step(request.run_id, step)
+            if output:
+                step_input[key] = extract_clean_content(output.get('output'))
 
     if request.next_step_name == "11_DOSSIER_COMPOSER":
         # Dossier composer needs all research narratives and enrichment outputs

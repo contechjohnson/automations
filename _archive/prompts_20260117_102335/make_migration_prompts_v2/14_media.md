@@ -37,6 +37,12 @@ Claims from Insight (07B) step
 **target_entity**
 Canonical name of the target company (NOT the client)
 
+**target_domain** *(REQUIRED)*
+The verified primary domain of the target company (e.g., "tract.com", "cyrusone.com"). This is extracted from entity research and MUST be used for the logo_url. Do NOT extract or guess the domain - use this value directly.
+
+**project_name** *(REQUIRED)*
+The specific project name from the signal/opportunity (e.g., "Caldwell Valley Data Center Campus")
+
 ---
 
 ## Main Prompt Template
@@ -54,13 +60,24 @@ Find ONE high-quality image of the SPECIFIC PROJECT mentioned in the context. Th
 
 ### Instructions
 
-**Phase 1: Extract Target Domain (for Logo)**
+**Phase 1: Validate Inputs (CRITICAL)**
 
-From individual claims or context_pack, find the TARGET company's primary domain:
-- Look for website URLs in entity research claims
-- Look for email domains from contact claims
-- Extract clean domain (e.g., "cyrusone.com" not "www.cyrusone.com")
-- **CRITICAL: This must be the TARGET entity domain, NOT the client (Roger Acres)**
+You receive `target_entity`, `target_domain`, and `project_name` as explicit inputs. **USE THESE DIRECTLY - DO NOT EXTRACT OR GUESS.**
+
+**Validation Checks:**
+1. Confirm `target_domain` looks reasonable for `target_entity` (e.g., "tract.com" for "Tract")
+2. If domain seems wrong (e.g., domain doesn't match company name at all), FLAG THIS in your output with `"domain_validation_warning": true`
+3. **NEVER use a different domain than what's provided in `target_domain`**
+
+**Example:**
+- `target_entity`: "Tract"
+- `target_domain`: "tract.com" ✓ (matches)
+- `project_name`: "Caldwell Valley Data Center Campus"
+
+**If `target_domain` is missing or empty:**
+- Fall back to extracting from entity_research_claims ONLY
+- Look for `primary_domain` or `email_domain` fields
+- Flag this: `"domain_extracted_fallback": true`
 
 **Phase 2: Find ONE Best Project Image**
 
@@ -72,10 +89,11 @@ Use Firecrawl tools and web search to find the SINGLE most relevant project imag
 3. News articles covering THIS SPECIFIC PROJECT
 4. EPCM firm or contractor websites featuring THIS PROJECT
 
-**Search Queries (use context to customize):**
-- "[Target Company name] [Specific Project name] photos"
-- "[Specific Project name] construction images site:[company domain]"
-- "[Target Company] [Project type] [Location] facility images"
+**Search Queries (use the provided inputs):**
+- "{{target_entity}} {{project_name}} photos"
+- "{{project_name}} construction images site:{{target_domain}}"
+- "{{target_entity}} facility images {{project_name}}"
+- "{{project_name}} aerial view rendering"
 
 **What to Look For - PROJECT IMAGES ONLY:**
 - **Construction progress photos** of THIS project
@@ -104,16 +122,20 @@ Return valid JSON matching this exact structure:
 
 ```json
 {
-  "logo_url": "https://img.logo.dev/[target_domain]?token=pk_YPO0MxEiQPyTfyts19t4ug",
+  "logo_url": "https://img.logo.dev/{{target_domain}}?token=pk_YPO0MxEiQPyTfyts19t4ug",
   "logo_source": "logo.dev",
   "logo_fallback_chain": ["logo.dev"],
   "enriched_at": "[current_timestamp]",
+  "target_entity_used": "{{target_entity}}",
+  "target_domain_used": "{{target_domain}}",
+  "project_name_used": "{{project_name}}",
+  "domain_validation_warning": false,
   "project_images": [
     {
       "url": "https://example.com/images/specific-project-photo.jpg",
       "caption": "Brief description of what THIS SPECIFIC PROJECT IMAGE shows",
       "source_url": "https://example.com/news/project-article",
-      "project_name": "Specific Project Name from context"
+      "project_name": "{{project_name}}"
     }
   ]
 }
@@ -121,15 +143,19 @@ Return valid JSON matching this exact structure:
 
 **Field Explanations:**
 
-- **logo_url**: Constructed as `https://img.logo.dev/{target_domain}?token=pk_YPO0MxEiQPyTfyts19t4ug` where {target_domain} is the TARGET company's clean domain (NOT the client's domain)
-- **logo_source**: Always "logo.dev" (we use logo.dev API for consistent logo fetching)
-- **logo_fallback_chain**: Always `["logo.dev"]` for now
+- **logo_url**: Constructed as `https://img.logo.dev/{{target_domain}}?token=pk_YPO0MxEiQPyTfyts19t4ug` - USE THE PROVIDED `target_domain` DIRECTLY
+- **logo_source**: Always "logo.dev"
+- **logo_fallback_chain**: Always `["logo.dev"]`
 - **enriched_at**: Current timestamp in ISO 8601 format with timezone
+- **target_entity_used**: Echo back the `target_entity` input (for validation/debugging)
+- **target_domain_used**: Echo back the `target_domain` input (for validation/debugging)
+- **project_name_used**: Echo back the `project_name` input (for validation/debugging)
+- **domain_validation_warning**: Set to `true` if the domain doesn't seem to match the company name (e.g., "canadanickel.com" for "Tract")
 - **project_images**: Array with EXACTLY ONE image object (or empty array if none found):
   - **url**: Direct link to the PROJECT image file
-  - **caption**: Description of the PROJECT image (1-2 sentences) - what facility/construction/project does this show?
+  - **caption**: Description of the PROJECT image (1-2 sentences)
   - **source_url**: The webpage where you found the image
-  - **project_name**: Name of the specific project from context_pack or merged_claims
+  - **project_name**: USE the provided `{{project_name}}` input
 
 **If No Project Image Found:**
 Return empty project_images array (logo still required):
@@ -145,11 +171,12 @@ Return empty project_images array (logo still required):
 
 ### Constraints
 
-**Logo Construction (CRITICAL - Must be TARGET company):**
-- Extract clean domain from TARGET entity claims (e.g., "cyrusone.com" not "www.cyrusone.com")
-- **DO NOT use client domain (Roger Acres)** - use TARGET company domain
-- Always use logo.dev URL format: `https://img.logo.dev/{target_domain}?token=pk_YPO0MxEiQPyTfyts19t4ug`
-- Don't try to find or validate the logo - logo.dev handles that automatically
+**Logo Construction (CRITICAL - Use Provided Domain):**
+- **USE `{{target_domain}}` DIRECTLY** - do NOT extract, guess, or modify it
+- Construct logo_url as: `https://img.logo.dev/{{target_domain}}?token=pk_YPO0MxEiQPyTfyts19t4ug`
+- If target_domain is "tract.com", logo_url MUST be `https://img.logo.dev/tract.com?token=...`
+- **DO NOT use any other domain** - even if you see other domains in the claims
+- logo.dev handles fetching the actual logo image automatically
 
 **Image Search (CRITICAL - Must be PROJECT-specific):**
 - Find EXACTLY ONE best project image (or empty array if none found)
@@ -195,10 +222,19 @@ Return empty project_images array (logo still required):
 - Firecrawl MCP (scraping, search, map for finding project images)
 - Web search capability via MCP
 
-**Input Dependencies:**
+**Input Dependencies (CRITICAL):**
 - context_pack from CONTEXT_PACK step (provides rich project context)
-- ALL individual claims from each extraction step (Signal, Entity, Contact Discovery, Enrich Lead, Enrich Opportunity, Client Specific, Insight)
-- target_entity (TARGET company name, not client)
+- ALL individual claims from each extraction step
+- **target_entity** - TARGET company name (from seed_data or entity research)
+- **target_domain** - TARGET company domain (from entity research `resolved_entity.primary_domain`)
+- **project_name** - Specific project name (from signal discovery or entity research)
+
+**Pipeline must pass these explicitly from upstream steps:**
+```
+target_entity = seed_data.company_name OR entity_research.resolved_entity.company_name
+target_domain = entity_research.resolved_entity.primary_domain
+project_name = signal_discovery.project_name OR entity_research.opportunity.project_name
+```
 
 **Next Steps:**
 - Media object flows to v2_dossiers table (media JSONB column)

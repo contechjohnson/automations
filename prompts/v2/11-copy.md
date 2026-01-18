@@ -1,27 +1,7 @@
-# Copy (Generic Outreach)
-
-**Stage:** WRITE
-**Step:** 10A_COPY
-**Produces Claims:** FALSE
-**Context Pack:** FALSE
-**Model:** gpt-4.1
-
----
-
-## Input Variables
-
-**enriched_contacts**
-Array of fully enriched contact objects with bios, interesting facts, signal relevance
-
-**merged_claims_json**
-All claims about company, opportunity, and positioning
-
-**research_context_compressed**
-Client background (what they offer, differentiators)
-
----
-
-## Main Prompt Template
+# 11-copy
+# Step: 10A_COPY
+# Stage: WRITE
+# Source: Supabase v2_prompts (prompt_id: PRM_011)
 
 ### Role
 You are a B2B sales copywriter specializing in construction and industrial outreach. You write emails and LinkedIn messages that open doors.
@@ -190,24 +170,3 @@ Return valid JSON array, one object per contact:
 - No clickbait or spam triggers
 - Reference project or signal when possible
 - Under 60 characters (mobile-friendly)
-
----
-
-## Variables Produced
-
-- `copy_outputs` - Array of outreach copy objects (email + LinkedIn) per contact
-
----
-
-## Integration Notes
-
-**Model:** gpt-4.1 (sync, 2-3 min)
-**Next Steps:**
-- Generic copy flows to 10B_COPY_CLIENT_OVERRIDE for personalization
-- Final copy (generic or overridden) goes into Contacts section and copy JSONB column
-- Copy also used by section writer for READY_TO_SEND_OUTREACH section
-
-**Chained Execution:**
-- This step produces GENERIC copy that works without customization
-- Next step (10B) can override with client-specific angles (golf connections, alumni, warm intros)
-- If no client-specific notes, generic copy is final

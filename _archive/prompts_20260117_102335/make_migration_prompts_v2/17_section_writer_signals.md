@@ -136,6 +136,7 @@ Return valid JSON for `find_lead` column (this section adds to existing INTRO da
 ```json
 {
   "primary_buying_signal": {
+    "signal": "EPCM Award",
     "signal_type": "epcm_award",
     "description": "[EPCM Firm] awarded EPCM contract for $1.2B [Project Name] nickel mine",
     "date": "2025-07-15",
@@ -144,12 +145,14 @@ Return valid JSON for `find_lead` column (this section adds to existing INTRO da
   },
   "additional_signals": [
     {
+      "signal": "Regulatory Approval",
       "signal_type": "regulatory_approval",
       "description": "[Geography] removed Environmental Assessment requirement for access road",
       "date": "2025-07-04",
       "source_url": "https://ero.ontario.ca/..."
     },
     {
+      "signal": "Funding Secured",
       "signal_type": "funding_secured",
       "description": "$500M equity financing closed with Orion Mine Finance",
       "date": "2025-06-20",
@@ -208,8 +211,11 @@ Return valid JSON for `find_lead` column (this section adds to existing INTRO da
 ## Variables Produced
 
 Fields added to `find_lead` JSONB column:
-- `primary_buying_signal` - Object with signal details
-- `additional_signals` - Array of supporting signals
+- `primary_buying_signal` - Object with signal details:
+  - `signal` - Human-readable label (e.g., "EPCM Award", "Land Acquisition")
+  - `signal_type` - Machine code (e.g., "epcm_award", "land_acquisition_data_center")
+  - `description`, `date`, `source_url`, `source_tier`
+- `additional_signals` - Array of supporting signals (each with `signal` and `signal_type`)
 - `timing_analysis` - Text explaining project timeline
 - `timing_urgency` - HIGH | MEDIUM | LOW
 - `urgency_explanation` - Justification for urgency level

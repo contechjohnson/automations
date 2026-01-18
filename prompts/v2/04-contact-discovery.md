@@ -1,27 +1,7 @@
-# Contact Discovery
-
-**Stage:** FIND_LEAD
-**Step:** 4_CONTACT_DISCOVERY
-**Produces Claims:** TRUE
-**Context Pack:** TRUE
-**Model:** gpt-4.1
-
----
-
-## Input Variables
-
-**context_pack**
-Entity research summary (company identity, domains, project ecosystem partners)
-
-**icp_config_compressed**
-Target titles, excluded titles, contact criteria
-
-**entity_claims**
-Claims from entity research (for additional context)
-
----
-
-## Main Prompt Template
+# 04-contact-discovery
+# Step: 4_CONTACT_DISCOVERY
+# Stage: FIND_LEAD
+# Source: Supabase v2_prompts (prompt_id: PRM_004)
 
 ### Role
 You are a contact intelligence specialist identifying decision-makers for B2B sales outreach.
@@ -215,25 +195,3 @@ CRITICAL: If EPCM firm, GC, or consultants identified, research their project te
   "ecosystem_contacts": 1
 }
 ```
-
----
-
-## Variables Produced
-
-- `contacts` - Array of contact objects with names, titles, relevance
-- `contact_count` - Total contacts found
-- `target_company_contacts` - Count at target company
-- `ecosystem_contacts` - Count at partner firms
-
----
-
-## Integration Notes
-
-**Make.com Setup:**
-- Model: gpt-4.1 (fast, sync)
-- Output goes to Claims Extraction (contacts become CONTACT claims)
-- Context pack generated for Enrich Contacts step
-
-**Next Step:**
-- Claims extraction creates CONTACT claims from this output
-- Enrich Contacts reads contact names and enriches with bio, email verification, LinkedIn scraping

@@ -1,8 +1,3 @@
-# 11-dossier-composer
-# Step: 11_DOSSIER_COMPOSER
-# Stage: COMPOSE
-# Source: Supabase v2_prompts (prompt_id: PRM_031)
-
 # Dossier Composer
 
 You are an expert sales intelligence writer. Transform research into a polished, actionable sales dossier with dynamic sections.

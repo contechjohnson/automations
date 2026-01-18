@@ -63,12 +63,12 @@ Return structured discoveries with all context needed for entity research.
 Return valid JSON with snake_case field names:
 
 ```json
-
 {
   "discoveries": [
     {
       "company_name": "[company_name]",
-      "signal_type": "[signal_type_from_icp]",
+      "signal": "[Human-readable signal label]",
+      "signal_type": "[signal_type_code_from_icp]",
       "signal_description": "[signal_description_from_discovery]",
       "date": "[date_found]",
       "source_url": "[source_url]",
@@ -82,8 +82,35 @@ Return valid JSON with snake_case field names:
   "sources_found": 47,
   "exclude_domains_updated": ["domain1.com", "domain2.com"]
 }
-
 ```
+
+**Signal Labels (human-readable):**
+Map the `signal_type` code to a human-readable `signal` label:
+
+| signal_type (code) | signal (label) |
+|-------------------|----------------|
+| `land_acquisition_data_center` | "Land Acquisition" |
+| `land_acquisition_*` | "Land Acquisition" |
+| `utility_interconnection_*` | "Utility Interconnection" |
+| `building_permit` | "Building Permit" |
+| `epcm_award` | "EPCM Award" |
+| `general_contractor_award` | "GC Award" |
+| `regulatory_approval` | "Regulatory Approval" |
+| `environmental_assessment_*` | "Environmental Approval" |
+| `funding_round` | "Funding Round" |
+| `expansion_announcement` | "Expansion Announced" |
+| `construction_start` | "Construction Started" |
+| `groundbreaking` | "Groundbreaking" |
+| `site_plan_approval` | "Site Plan Approved" |
+| `zoning_change` | "Zoning Approval" |
+| `acquisition_announcement` | "Acquisition" |
+
+**If signal_type doesn't match these patterns**, create a sensible human-readable label (Title Case, remove underscores).
+
+**Examples:**
+- `signal_type: "land_acquisition_data_center"` → `signal: "Land Acquisition"`
+- `signal_type: "utility_interconnection_secured"` → `signal: "Utility Interconnection"`
+- `signal_type: "building_permit_issued"` → `signal: "Building Permit"`
 
 ### Constraints
 - Valid JSON only
