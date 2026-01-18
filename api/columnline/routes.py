@@ -2612,6 +2612,22 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'status': 'published'
     })
 
+    # Build rendered object with all dossier data for inspection
+    rendered = {
+        'company_name': company_name,
+        'company_domain': company_domain,
+        'find_lead': find_lead,
+        'enrich_lead': enrich_lead,
+        'copy': copy_data,
+        'insight': insight_data,
+        'media': media_data,
+        'sections': sections,
+        'contacts': contacts_list,
+        'lead_score': find_lead.get('lead_score', 0),
+        'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
+        'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
+    }
+
     return PublishResponse(
         success=True,
         run_id=run_id,
@@ -2621,7 +2637,8 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         pipeline_version='v2',
         released_at=released_at,
         release_date=release_date,
-        message=f"Dossier published to production with {contacts_created} contacts"
+        message=f"Dossier published to production with {contacts_created} contacts",
+        rendered=rendered
     )
 
 

@@ -501,3 +501,7 @@ class PublishResponse(BaseModel):
     released_at: Optional[str] = None
     release_date: Optional[str] = None
     message: str = "Dossier published to production successfully"
+    rendered: Optional[dict] = Field(
+        default=None,
+        description="Full rendered dossier data as it appears in production"
+    )
