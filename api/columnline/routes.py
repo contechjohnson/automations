@@ -2846,14 +2846,14 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
 
     # Build rendered object in V1 UI format (matches DossierView.tsx expectations)
     # This mirrors the transformDossier function in web/lib/transforms.ts
-    primary_signal = find_lead.get('primary_buying_signal', {})
-    company_snapshot = find_lead.get('company_snapshot', {})
-    company_deep_dive = enrich_lead.get('company_deep_dive', {})
-    network_intel = enrich_lead.get('network_intelligence', {})
-    the_math = insight_data.get('the_math', {})
-    competitive = insight_data.get('competitive_positioning', {})
-    decision_making = insight_data.get('decision_making_process', {})
-    deal_strat = insight_data.get('deal_strategy', {})
+    primary_signal = find_lead.get('primary_buying_signal') or {}
+    company_snapshot = find_lead.get('company_snapshot') or {}
+    company_deep_dive = enrich_lead.get('company_deep_dive') or {}
+    network_intel = enrich_lead.get('network_intelligence') or {}
+    the_math = insight_data.get('the_math') or {}
+    competitive = insight_data.get('competitive_positioning') or {}
+    decision_making = insight_data.get('decision_making_process') or {}
+    deal_strat = insight_data.get('deal_strategy') or {}
 
     # Build whyNow signals array
     why_now_signals = []
