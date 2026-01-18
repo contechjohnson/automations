@@ -656,6 +656,12 @@ async def prepare_steps(request: StepPrepareRequest):
                 elif '4_contact_discovery_output' in step_input_data:
                     step_input["contact_discovery_claims"] = claims_output
 
+        # Contact Discovery needs Entity Research output
+        if step_name == "4_CONTACT_DISCOVERY":
+            entity_output = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity_output:
+                step_input["entity_context_pack"] = extract_clean_content(entity_output.get('output'))
+
         # Insight needs ALL individual claims (not merged yet)
         if step_name == "07B_INSIGHT":
             # Find all completed claims extraction steps
@@ -2189,9 +2195,9 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     insight_data = assemble_insight(step_outputs)
     media_data = assemble_media(step_outputs)
 
-    # 6b. Extract sections from Dossier Composer (if available)
-    sections = None
-    composer_metadata = {}
+    # 6b. Extract V1 fields from Dossier Composer (if available)
+    # NOTE: V2 composer outputs flat V1 JSON fields, NOT sections[]
+    sections = None  # Keep null to disable DynamicDossierView, use V1 rendering
     composer_step = step_outputs.get('11_DOSSIER_COMPOSER', {})
     print(f"  [DEBUG] composer_step exists: {bool(composer_step)}")
     print(f"  [DEBUG] composer_step keys: {list(composer_step.keys()) if composer_step else 'N/A'}")
@@ -2201,22 +2207,81 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         composer_output = extract_clean_content(raw_output)
         print(f"  [DEBUG] composer_output type: {type(composer_output)}, keys: {list(composer_output.keys()) if isinstance(composer_output, dict) else 'N/A'}")
         if isinstance(composer_output, dict):
-            sections = composer_output.get('sections', [])
-            composer_metadata = composer_output.get('metadata', {})
-            print(f"  [DEBUG] Extracted {len(sections) if sections else 0} sections from composer")
-            if sections:
-                print(f"  [DEBUG] First section id: {sections[0].get('id') if sections else 'N/A'}")
+            print(f"  [DEBUG] Mapping V1 composer output to dossier fields")
 
-            # Override find_lead fields from composer metadata (if available)
-            if composer_metadata:
-                if composer_metadata.get('lead_score'):
-                    find_lead['lead_score'] = composer_metadata['lead_score']
-                if composer_metadata.get('timing_urgency'):
-                    find_lead['timing_urgency'] = composer_metadata['timing_urgency']
-                if composer_metadata.get('primary_signal'):
-                    find_lead['primary_buying_signal'] = {'signal': composer_metadata['primary_signal']}
-                if composer_metadata.get('company_name'):
-                    find_lead['company_name'] = composer_metadata['company_name']
+            # Map V1 composer output to find_lead fields
+            if composer_output.get('companyName'):
+                find_lead['company_name'] = composer_output['companyName']
+            if composer_output.get('domain'):
+                find_lead['company_snapshot'] = find_lead.get('company_snapshot', {})
+                find_lead['company_snapshot']['domain'] = composer_output['domain']
+            if composer_output.get('whatTheyDo'):
+                find_lead['what_they_do'] = composer_output['whatTheyDo']
+            if composer_output.get('theAngle'):
+                find_lead['the_angle'] = composer_output['theAngle']
+            if composer_output.get('leadScore'):
+                find_lead['lead_score'] = composer_output['leadScore']
+            if composer_output.get('explanation'):
+                find_lead['score_explanation'] = composer_output['explanation']
+            if composer_output.get('urgency'):
+                find_lead['timing_urgency'] = composer_output['urgency']
+            if composer_output.get('timingContext'):
+                find_lead['one_liner'] = composer_output['timingContext']
+            if composer_output.get('opportunityIntelligence'):
+                find_lead['opportunity_intelligence'] = composer_output['opportunityIntelligence']
+            if composer_output.get('customResearch'):
+                find_lead['custom_research'] = composer_output['customResearch']
+
+            # Map V1 composer output to enrich_lead fields
+            if composer_output.get('companyIntel'):
+                enrich_lead['company_intel'] = composer_output['companyIntel']
+            if composer_output.get('whyNow'):
+                enrich_lead['why_now'] = composer_output['whyNow']
+            if composer_output.get('corporateStructure'):
+                enrich_lead['corporate_structure'] = composer_output['corporateStructure']
+            if composer_output.get('networkIntelligence'):
+                enrich_lead['network_intelligence'] = composer_output['networkIntelligence']
+
+            # Map V1 composer output to insight fields
+            if composer_output.get('theMathStructured'):
+                insight_data['the_math'] = composer_output['theMathStructured']
+            if composer_output.get('dealStrategy'):
+                insight_data['deal_strategy'] = composer_output['dealStrategy']
+            if composer_output.get('competitivePositioning'):
+                insight_data['competitive_positioning'] = composer_output['competitivePositioning']
+            if composer_output.get('decisionStrategy'):
+                insight_data['decision_strategy'] = composer_output['decisionStrategy']
+            if composer_output.get('commonObjections'):
+                insight_data['common_objections'] = composer_output['commonObjections']
+            if composer_output.get('quickReference'):
+                insight_data['quick_reference'] = composer_output['quickReference']
+            if composer_output.get('sources'):
+                insight_data['sources'] = composer_output['sources']
+
+            print(f"  [DEBUG] V1 mapping complete: lead_score={find_lead.get('lead_score')}, the_angle present={bool(find_lead.get('the_angle'))}")
+
+    # 6c. Extract client-specific output DIRECTLY (runs ASYNC with composer)
+    # This handles the case where 5C_CLIENT_SPECIFIC runs in parallel and outputs V1 JSON directly
+    client_specific_step = step_outputs.get('5C_CLIENT_SPECIFIC', {})
+    if client_specific_step:
+        cs_output = extract_clean_content(client_specific_step.get('output', {}))
+        if isinstance(cs_output, dict):
+            # customResearch goes to find_lead (if not already set by composer)
+            if cs_output.get('customResearch') and not find_lead.get('custom_research'):
+                find_lead['custom_research'] = cs_output['customResearch']
+
+            # warmPathsIn goes to network_intelligence
+            if cs_output.get('warmPathsIn'):
+                if not enrich_lead.get('network_intelligence'):
+                    enrich_lead['network_intelligence'] = {}
+                enrich_lead['network_intelligence']['warm_paths_in'] = cs_output['warmPathsIn']
+
+            # Merge sources
+            if cs_output.get('sources'):
+                existing_sources = insight_data.get('sources', [])
+                insight_data['sources'] = existing_sources + cs_output['sources']
+
+            print(f"  [DEBUG] 5C_CLIENT_SPECIFIC extracted: customResearch={bool(cs_output.get('customResearch'))}, warmPathsIn={bool(cs_output.get('warmPathsIn'))}")
 
     # 7. Insert contacts and build ID map
     contact_id_map = {}
