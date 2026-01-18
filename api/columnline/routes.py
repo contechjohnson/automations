@@ -656,11 +656,14 @@ async def prepare_steps(request: StepPrepareRequest):
                 elif '4_contact_discovery_output' in step_input_data:
                     step_input["contact_discovery_claims"] = claims_output
 
-        # Contact Discovery needs Entity Research output
+        # Contact Discovery needs Signal Discovery + Entity Research outputs
         if step_name == "4_CONTACT_DISCOVERY":
+            signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal_output:
+                step_input["signal_discovery_output"] = extract_clean_content(signal_output.get('output'))
             entity_output = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
             if entity_output:
-                step_input["entity_context_pack"] = extract_clean_content(entity_output.get('output'))
+                step_input["entity_research_output"] = extract_clean_content(entity_output.get('output'))
 
         # Insight needs ALL individual claims (not merged yet)
         if step_name == "07B_INSIGHT":
@@ -1289,8 +1292,12 @@ async def transition_step(request: StepTransitionRequest):
                 step_input["latest_claims"] = clean_output
 
     if request.next_step_name == "4_CONTACT_DISCOVERY":
-        # Contact discovery needs the entity context pack (just completed)
-        step_input["entity_context_pack"] = clean_output
+        # Contact discovery needs signal + entity research outputs
+        signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+        if signal_output:
+            step_input["signal_discovery_output"] = extract_clean_content(signal_output.get('output'))
+        # Entity research just completed - pass as entity_research_output (not context pack)
+        step_input["entity_research_output"] = clean_output
 
     if request.next_step_name in ["5A_ENRICH_LEAD", "5B_ENRICH_OPPORTUNITY", "5C_CLIENT_SPECIFIC"]:
         # Enrich steps need signal, entity, contact outputs AND available claims
