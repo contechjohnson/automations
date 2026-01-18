@@ -661,25 +661,35 @@ async def prepare_steps(request: StepPrepareRequest):
 
         # Contact Discovery needs Signal Discovery + Entity Research outputs
         if step_name == "4_CONTACT_DISCOVERY":
+            print(f"[PREPARE 4_CONTACT_DISCOVERY] Fetching dependencies for run {request.run_id}")
             signal_output = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            print(f"[PREPARE 4_CONTACT_DISCOVERY] 2_SIGNAL_DISCOVERY found: {bool(signal_output)}")
             if signal_output:
                 step_input["signal_discovery_output"] = extract_clean_content(signal_output.get('output'))
+                print(f"[PREPARE 4_CONTACT_DISCOVERY] Added signal_discovery_output")
             entity_output = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            print(f"[PREPARE 4_CONTACT_DISCOVERY] 3_ENTITY_RESEARCH found: {bool(entity_output)}")
             if entity_output:
                 step_input["entity_research_output"] = extract_clean_content(entity_output.get('output'))
+                print(f"[PREPARE 4_CONTACT_DISCOVERY] Added entity_research_output")
 
         # Insight needs ALL research narratives (not claims)
         if step_name == "07B_INSIGHT":
+            print(f"[PREPARE 07B_INSIGHT] Fetching research narratives for run {request.run_id}")
+
             # Fetch all research narratives
             signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            print(f"[PREPARE 07B_INSIGHT] 2_SIGNAL_DISCOVERY found: {bool(signal)}")
             if signal:
                 step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
 
             entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            print(f"[PREPARE 07B_INSIGHT] 3_ENTITY_RESEARCH found: {bool(entity)}")
             if entity:
                 step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
 
             contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+            print(f"[PREPARE 07B_INSIGHT] 4_CONTACT_DISCOVERY found: {bool(contacts)}")
             if contacts:
                 step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
 
@@ -690,6 +700,7 @@ async def prepare_steps(request: StepPrepareRequest):
                 ("5C_CLIENT_SPECIFIC", "client_specific_output"),
             ]:
                 output = repo.get_completed_step(request.run_id, step)
+                print(f"[PREPARE 07B_INSIGHT] {step} found: {bool(output)}")
                 if output:
                     step_input[key] = extract_clean_content(output.get('output'))
 
