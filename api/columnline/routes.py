@@ -2193,12 +2193,19 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     sections = None
     composer_metadata = {}
     composer_step = step_outputs.get('11_DOSSIER_COMPOSER', {})
+    print(f"  [DEBUG] composer_step exists: {bool(composer_step)}")
+    print(f"  [DEBUG] composer_step keys: {list(composer_step.keys()) if composer_step else 'N/A'}")
     if composer_step:
-        composer_output = extract_clean_content(composer_step.get('output', {}))
+        raw_output = composer_step.get('output', {})
+        print(f"  [DEBUG] raw_output type: {type(raw_output)}, keys: {list(raw_output.keys()) if isinstance(raw_output, dict) else 'N/A'}")
+        composer_output = extract_clean_content(raw_output)
+        print(f"  [DEBUG] composer_output type: {type(composer_output)}, keys: {list(composer_output.keys()) if isinstance(composer_output, dict) else 'N/A'}")
         if isinstance(composer_output, dict):
             sections = composer_output.get('sections', [])
             composer_metadata = composer_output.get('metadata', {})
-            print(f"  Extracted {len(sections) if sections else 0} sections from composer")
+            print(f"  [DEBUG] Extracted {len(sections) if sections else 0} sections from composer")
+            if sections:
+                print(f"  [DEBUG] First section id: {sections[0].get('id') if sections else 'N/A'}")
 
             # Override find_lead fields from composer metadata (if available)
             if composer_metadata:
