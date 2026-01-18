@@ -17,7 +17,6 @@
 | `event_type` | TEXT | `step` (default), `stage_start`, or `stage_complete` |
 | `input` | JSONB | Input data passed to the step |
 | `output` | JSONB | Full output from the step (LLM response) |
-| `tokens_used` | INTEGER | Total tokens (input + output) |
 | `input_tokens` | INTEGER | Input/prompt tokens from OpenAI response |
 | `output_tokens` | INTEGER | Output/completion tokens from OpenAI response |
 | `estimated_cost` | NUMERIC(10,6) | Estimated cost in USD based on model pricing |
@@ -26,6 +25,7 @@
 | `started_at` | TIMESTAMP | Step start time |
 | `completed_at` | TIMESTAMP | Step completion time |
 | `error_message` | TEXT | Error details if failed |
+| `tokens_used` | INTEGER | **DEPRECATED** - use input_tokens + output_tokens instead |
 
 ---
 

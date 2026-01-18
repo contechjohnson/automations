@@ -1060,7 +1060,6 @@ async def complete_steps(request: StepCompleteRequest):
 
         # AUTO-PARSE: Extract tokens, runtime, model, and calculate cost
         parsed = parse_openai_response(output_item.output)
-        tokens_used = output_item.tokens_used if output_item.tokens_used is not None else parsed['tokens_used']
         runtime_seconds = output_item.runtime_seconds if output_item.runtime_seconds is not None else parsed['runtime_seconds']
         output_to_store = parsed['full_output']
 
@@ -1068,17 +1067,17 @@ async def complete_steps(request: StepCompleteRequest):
         input_tokens = parsed['input_tokens']
         output_tokens = parsed['output_tokens']
         model_used = parsed['model_used'] or step.get('model_used')  # Fallback to step's model if not in response
+        total_tokens = input_tokens + output_tokens
 
         # Calculate estimated cost
         estimated_cost = 0.0
-        if model_used and (input_tokens > 0 or output_tokens > 0):
+        if model_used and total_tokens > 0:
             estimated_cost = calculate_cost(model_used, input_tokens, output_tokens)
 
         # Update step to completed with cost tracking
         repo.update_pipeline_step(step['step_id'], {
             "status": "completed",
             "output": output_to_store,
-            "tokens_used": tokens_used,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "model_used": model_used,
@@ -1088,8 +1087,8 @@ async def complete_steps(request: StepCompleteRequest):
         })
 
         # Increment run totals
-        if tokens_used > 0 or estimated_cost > 0:
-            repo.increment_run_costs(request.run_id, tokens_used, estimated_cost)
+        if total_tokens > 0 or estimated_cost > 0:
+            repo.increment_run_costs(request.run_id, total_tokens, estimated_cost)
 
         completed_steps.append(output_item.step_name)
 
@@ -1231,16 +1230,16 @@ async def transition_step(request: StepTransitionRequest):
         input_tokens = parsed['input_tokens']
         output_tokens = parsed['output_tokens']
         model_used = parsed['model_used'] or completed_step.get('model_used')
+        total_tokens = input_tokens + output_tokens
 
         # Calculate estimated cost
         estimated_cost = 0.0
-        if model_used and (input_tokens > 0 or output_tokens > 0):
+        if model_used and total_tokens > 0:
             estimated_cost = calculate_cost(model_used, input_tokens, output_tokens)
 
         repo.update_pipeline_step(completed_step['step_id'], {
             "status": "completed",
             "output": parsed['full_output'],
-            "tokens_used": parsed['tokens_used'],
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "model_used": model_used,
@@ -1250,8 +1249,8 @@ async def transition_step(request: StepTransitionRequest):
         })
 
         # Increment run totals
-        if parsed['tokens_used'] > 0 or estimated_cost > 0:
-            repo.increment_run_costs(request.run_id, parsed['tokens_used'], estimated_cost)
+        if total_tokens > 0 or estimated_cost > 0:
+            repo.increment_run_costs(request.run_id, total_tokens, estimated_cost)
     # If step doesn't exist at all, that's okay - just proceed to create the next one
 
     # Now prepare the next step (same logic as /steps/prepare but for one step)
@@ -2522,7 +2521,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     if contacts_step:
         clean = extract_clean_content(contacts_step.get('output', {}))
         if isinstance(clean, dict):
-            contacts_list = clean.get('contacts', clean.get('enriched_contacts', clean.get('key_contacts', [])))
+            contacts_list = clean.get('contacts') or clean.get('enriched_contacts') or clean.get('key_contacts') or []
         elif isinstance(clean, list):
             contacts_list = clean
 
@@ -2554,7 +2553,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     for step in copy_steps.data:
         copy_output = extract_clean_content(step.get('output', {}))
         if isinstance(copy_output, dict):
-            copy_outputs = copy_output.get('copy_outputs', [])
+            copy_outputs = copy_output.get('copy_outputs') or []
             for copy_item in copy_outputs:
                 if isinstance(copy_item, dict):
                     contact_name = copy_item.get('contact_name', '')
@@ -2570,7 +2569,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     for step in override_steps.data:
         copy_output = extract_clean_content(step.get('output', {}))
         if isinstance(copy_output, dict):
-            copy_outputs = copy_output.get('copy_outputs', copy_output.get('override_copy', []))
+            copy_outputs = copy_output.get('copy_outputs') or copy_output.get('override_copy') or []
             for copy_item in copy_outputs:
                 if isinstance(copy_item, dict):
                     contact_name = copy_item.get('contact_name', '')
