@@ -157,7 +157,7 @@ def fetch_all_individual_claims(repo, run_id):
     claims_dict = {}
 
     # Find all completed claims extraction steps
-    all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+    all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
     # Mapping of research step names to dict keys
     step_mappings = {
@@ -199,7 +199,7 @@ def fetch_all_individual_claims(repo, run_id):
             claims_dict[claims_key] = claims_output
 
             # Fetch the original narrative from the research step
-            narrative_step = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('step_name', source_step_name).eq('status', 'completed').execute()
+            narrative_step = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', run_id).eq('step_name', source_step_name).eq('status', 'completed').execute()
 
             if narrative_step.data:
                 narrative_output = extract_clean_content(narrative_step.data[0].get('output'))
@@ -402,17 +402,17 @@ async def get_run_status(run_id: str):
 
 
 # ============================================================================
-# PIPELINE STEP ENDPOINTS (Logging & Polling)
+# PIPELINE LOG ENDPOINTS (Logging & Polling)
 # ============================================================================
 
-@router.post("/pipeline_steps", response_model=SuccessResponse)
+@router.post("/pipeline_logs", response_model=SuccessResponse)
 async def log_pipeline_step(step: PipelineStepCreate):
     """
     Log a pipeline step execution (dual-write pattern)
 
     Make.com usage (sub-scenario):
         [1] Log "running" status
-            POST /columnline/pipeline_steps
+            POST /columnline/pipeline_logs
             Body: {
                 step_id: "STEP_{{run_id}}_01",
                 run_id: {{run_id}},
@@ -426,7 +426,7 @@ async def log_pipeline_step(step: PipelineStepCreate):
         [2] Call LLM
 
         [3] Update to "completed"
-            PUT /columnline/pipeline_steps/{{step_id}}
+            PUT /columnline/pipeline_logs/{{step_id}}
             Body: {
                 status: "completed",
                 output: {{llm_response}},
@@ -439,15 +439,15 @@ async def log_pipeline_step(step: PipelineStepCreate):
 
     return SuccessResponse(
         success=True,
-        message="Pipeline step logged",
+        message="Pipeline log created",
         data={"step_id": result['step_id']}
     )
 
 
-@router.put("/pipeline_steps/{step_id}", response_model=SuccessResponse)
+@router.put("/pipeline_logs/{step_id}", response_model=SuccessResponse)
 async def update_pipeline_step(step_id: str, updates: PipelineStepUpdate):
     """
-    Update pipeline step (for dual-write pattern)
+    Update pipeline log (for dual-write pattern)
 
     See log_pipeline_step for usage example
     """
@@ -455,12 +455,12 @@ async def update_pipeline_step(step_id: str, updates: PipelineStepUpdate):
 
     return SuccessResponse(
         success=True,
-        message="Pipeline step updated",
+        message="Pipeline log updated",
         data={"step_id": result['step_id']}
     )
 
 
-@router.get("/pipeline_steps/{run_id}/completed", response_model=PipelineStepComplete)
+@router.get("/pipeline_logs/{run_id}/completed", response_model=PipelineStepComplete)
 async def check_step_completed(
     run_id: str,
     step_name: str = Query(..., description="Step name to check (e.g., 1_SEARCH_BUILDER)")
@@ -472,7 +472,7 @@ async def check_step_completed(
         [1] Call sub-scenario
         [2] Repeater (max 100)
         [3] Sleep 10s
-        [4] HTTP GET /columnline/pipeline_steps/{{run_id}}/completed?step_name=1_SEARCH_BUILDER
+        [4] HTTP GET /columnline/pipeline_logs/{{run_id}}/completed?step_name=1_SEARCH_BUILDER
         [5] Router
             - If {{4.found}} = true → Continue
             - Else → Back to [2]
@@ -489,7 +489,7 @@ async def check_step_completed(
 # CLAIMS ENDPOINTS
 # ============================================================================
 
-# NOTE: POST/GET /claims removed - claims stored in v2_pipeline_steps.output
+# NOTE: POST/GET /claims removed - claims stored in v2_pipeline_logs.output
 
 # ============================================================================
 # BATCH STEP EXECUTION (Prepare + Complete)
@@ -568,7 +568,7 @@ async def prepare_steps(request: StepPrepareRequest):
             raise HTTPException(status_code=404, detail=f"Prompt not found for step: {step_name}")
 
         # Generate step_id (use actual step count from DB to avoid conflicts)
-        existing_steps = repo.client.table('v2_pipeline_steps').select('step_id').eq('run_id', request.run_id).execute()
+        existing_steps = repo.client.table('v2_pipeline_logs').select('step_id').eq('run_id', request.run_id).execute()
         step_num = len(existing_steps.data) + 1
         step_id = f"STEP_{request.run_id}_{step_num:02d}"
 
@@ -613,7 +613,7 @@ async def prepare_steps(request: StepPrepareRequest):
             all_claims = []
 
             # Check for claims from Signal Discovery
-            signal_claims_step = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+            signal_claims_step = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
             for claims_step in signal_claims_step.data:
                 # Figure out which research step this came from by looking at the input
@@ -646,7 +646,7 @@ async def prepare_steps(request: StepPrepareRequest):
                 step_input["contact_discovery_output"] = extract_clean_content(contact_output.get('output'))
 
             # Add all available claims (signal, entity, contact)
-            all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+            all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
             for claims_step in all_claims_steps.data:
                 step_input_data = claims_step.get('input', {})
@@ -884,7 +884,7 @@ async def prepare_steps(request: StepPrepareRequest):
         # Merge Claims needs ALL claims including insight claims
         if step_name == "MERGE_CLAIMS":
             # Find all completed claims extraction steps
-            all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+            all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
             for claims_step in all_claims_steps.data:
                 # Figure out which research step this came from
@@ -1015,7 +1015,7 @@ async def complete_steps(request: StepCompleteRequest):
 
         # If step_id provided, find by ID directly (for parallel steps with same name)
         if output_item.step_id:
-            result = repo.client.table('v2_pipeline_steps').select('*').eq('step_id', output_item.step_id).eq('run_id', request.run_id).execute()
+            result = repo.client.table('v2_pipeline_logs').select('*').eq('step_id', output_item.step_id).eq('run_id', request.run_id).execute()
             if result.data:
                 step = result.data[0]
                 print(f"[COMPLETE] Found by step_id: {step['step_id']}")
@@ -1027,7 +1027,7 @@ async def complete_steps(request: StepCompleteRequest):
 
             # If not found, try to find the "running" step
             if not step:
-                result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', output_item.step_name).eq('status', 'running').execute()
+                result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', output_item.step_name).eq('status', 'running').execute()
                 if result.data:
                     # WARN if multiple running steps found
                     if len(result.data) > 1:
@@ -1187,11 +1187,11 @@ async def transition_step(request: StepTransitionRequest):
     parsed = parse_openai_response(request.completed_step_output)
 
     # Find the step to complete - try "running" first, then any status
-    result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).eq('status', 'running').execute()
+    result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).eq('status', 'running').execute()
 
     if not result.data:
         # Not in "running" status - try to find it with any status
-        result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).execute()
+        result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).execute()
 
     # If we found the step, update it to completed
     if result.data:
@@ -1220,7 +1220,7 @@ async def transition_step(request: StepTransitionRequest):
         raise HTTPException(status_code=404, detail=f"Prompt not found for step: {request.next_step_name}")
 
     # Generate step_id
-    existing_steps = repo.client.table('v2_pipeline_steps').select('step_id').eq('run_id', request.run_id).execute()
+    existing_steps = repo.client.table('v2_pipeline_logs').select('step_id').eq('run_id', request.run_id).execute()
     step_num = len(existing_steps.data) + 1
     next_step_id = f"STEP_{request.run_id}_{step_num:02d}"
 
@@ -1252,7 +1252,7 @@ async def transition_step(request: StepTransitionRequest):
 
     if request.next_step_name == "MERGE_CLAIMS":
         # Merge Claims needs ALL claims including insight claims
-        all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+        all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
         for claims_step in all_claims_steps.data:
             # Figure out which research step this came from
@@ -1284,7 +1284,7 @@ async def transition_step(request: StepTransitionRequest):
             # Legacy: Context pack after individual claims (not in 07B flow)
             # Context pack needs ALL claims extracted so far, not just the most recent
             # Find all completed claims extraction steps
-            all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+            all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
             for claims_step in all_claims_steps.data:
                 # Figure out which research step this came from
@@ -1332,7 +1332,7 @@ async def transition_step(request: StepTransitionRequest):
             step_input["contact_discovery_output"] = extract_clean_content(contact_output.get('output'))
 
         # Add all available claims (signal, entity, contact)
-        all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+        all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
         for claims_step in all_claims_steps.data:
             step_input_data = claims_step.get('input', {})
@@ -1347,7 +1347,7 @@ async def transition_step(request: StepTransitionRequest):
 
     if request.next_step_name == "07B_INSIGHT":
         # Insight (merge claims) needs ALL claims extracted so far
-        all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+        all_claims_steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
 
         for claims_step in all_claims_steps.data:
             # Figure out which research step this came from
@@ -1559,7 +1559,7 @@ async def stage_start(request: StageStartRequest):
     """
     Log the start of a pipeline stage.
 
-    Inserts a row into v2_pipeline_steps with event_type='stage_start'.
+    Inserts a row into v2_pipeline_logs with event_type='stage_start'.
     Called by Make.com Prime Pipeline before each stage begins.
     """
     import uuid
@@ -1574,7 +1574,7 @@ async def stage_start(request: StageStartRequest):
     step_name = f"STAGE_{request.stage_number}_{request.stage_name.upper()}"
     now = datetime.utcnow()
 
-    # Insert into v2_pipeline_steps with event_type
+    # Insert into v2_pipeline_logs with event_type
     step_data = {
         "step_id": step_id,
         "run_id": request.run_id,
@@ -1617,7 +1617,7 @@ async def stage_complete(request: StageCompleteRequest):
     step_name_pattern = f"STAGE_{request.stage_number}_%"
 
     # Look for the running stage_start row
-    result = repo.client.table('v2_pipeline_steps').select('*').eq(
+    result = repo.client.table('v2_pipeline_logs').select('*').eq(
         'run_id', request.run_id
     ).eq(
         'event_type', 'stage_start'
@@ -1702,7 +1702,7 @@ async def stage_complete(request: StageCompleteRequest):
 # SECTION ENDPOINTS
 # ============================================================================
 
-# NOTE: POST/GET /sections removed - sections stored in v2_pipeline_steps.output
+# NOTE: POST/GET /sections removed - sections stored in v2_pipeline_logs.output
 
 # ============================================================================
 # DOSSIER ENDPOINTS
@@ -2342,7 +2342,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
 
     # 4. Fetch all completed step outputs
     step_outputs = {}
-    steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('status', 'completed').execute()
+    steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', run_id).eq('status', 'completed').execute()
     for step in steps.data:
         step_outputs[step['step_name']] = step
 
@@ -2481,7 +2481,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     # Get individual contact enrichments (email, linkedin, signal_relevance, etc.)
     # Query directly since multiple steps share the same step_name
     individual_enrichments = {}
-    individual_steps = repo.client.table('v2_pipeline_steps').select('output').eq(
+    individual_steps = repo.client.table('v2_pipeline_logs').select('output').eq(
         'run_id', run_id
     ).eq('step_name', '6_ENRICH_CONTACT_INDIVIDUAL').eq('status', 'completed').execute()
 
@@ -2499,7 +2499,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     # Get copy data from 10A_COPY and 10B_COPY_CLIENT_OVERRIDE steps
     # Query directly since multiple steps share the same step_name
     contact_copy_data = {}
-    copy_steps = repo.client.table('v2_pipeline_steps').select('output').eq(
+    copy_steps = repo.client.table('v2_pipeline_logs').select('output').eq(
         'run_id', run_id
     ).eq('step_name', '10A_COPY').eq('status', 'completed').execute()
 
@@ -2515,7 +2515,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                         print(f"  Found copy for: {contact_name}")
 
     # Also check for client override copy (takes precedence)
-    override_steps = repo.client.table('v2_pipeline_steps').select('output').eq(
+    override_steps = repo.client.table('v2_pipeline_logs').select('output').eq(
         'run_id', run_id
     ).eq('step_name', '10B_COPY_CLIENT_OVERRIDE').eq('status', 'completed').execute()
 
@@ -3061,7 +3061,7 @@ async def debug_dump(run_id: str):
     dump["summary"]["status"] = run.get("status")
 
     # 2. Get all v2 pipeline steps with full output
-    steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).order('started_at').execute()
+    steps = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', run_id).order('started_at').execute()
     dump["v2"]["pipeline_steps"] = steps.data
     dump["summary"]["v2_steps_completed"] = len([s for s in steps.data if s.get('status') == 'completed'])
 

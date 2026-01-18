@@ -97,12 +97,12 @@ class ColumnlineRepository:
             return None
 
         # Get completed steps
-        completed = self.client.table('v2_pipeline_steps').select('step_name').eq('run_id', run_id).eq('status', 'completed').execute()
+        completed = self.client.table('v2_pipeline_logs').select('step_name').eq('run_id', run_id).eq('status', 'completed').execute()
 
         completed_steps = [s['step_name'] for s in completed.data]
 
         # Get current step (running)
-        running = self.client.table('v2_pipeline_steps').select('step_name').eq('run_id', run_id).eq('status', 'running').execute()
+        running = self.client.table('v2_pipeline_logs').select('step_name').eq('run_id', run_id).eq('status', 'running').execute()
 
         current_step = running.data[0]['step_name'] if running.data else None
 
@@ -122,12 +122,12 @@ class ColumnlineRepository:
 
     def create_pipeline_step(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
         """Log a pipeline step (dual-write: running, then completed)"""
-        result = self.client.table('v2_pipeline_steps').insert(step_data).execute()
+        result = self.client.table('v2_pipeline_logs').insert(step_data).execute()
         return result.data[0]
 
     def update_pipeline_step(self, step_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update pipeline step (for dual-write pattern)"""
-        result = self.client.table('v2_pipeline_steps').update(updates).eq('step_id', step_id).execute()
+        result = self.client.table('v2_pipeline_logs').update(updates).eq('step_id', step_id).execute()
         return result.data[0]
 
     def get_completed_step(self, run_id: str, step_name: str) -> Optional[Dict[str, Any]]:
@@ -136,7 +136,7 @@ class ColumnlineRepository:
 
         Returns step data if completed, None if not found or not completed
         """
-        result = self.client.table('v2_pipeline_steps').select('*').eq('run_id', run_id).eq('step_name', step_name).eq('status', 'completed').execute()
+        result = self.client.table('v2_pipeline_logs').select('*').eq('run_id', run_id).eq('step_name', step_name).eq('status', 'completed').execute()
 
         if result.data:
             return result.data[0]
@@ -162,7 +162,7 @@ class ColumnlineRepository:
                 ...
             }
         """
-        query = self.client.table('v2_pipeline_steps').select('step_name, step_id, output, completed_at, tokens_used, runtime_seconds').eq('run_id', run_id).eq('status', 'completed')
+        query = self.client.table('v2_pipeline_logs').select('step_name, step_id, output, completed_at, tokens_used, runtime_seconds').eq('run_id', run_id).eq('status', 'completed')
 
         if step_names:
             query = query.in_('step_name', step_names)
@@ -185,7 +185,7 @@ class ColumnlineRepository:
     # ========================================================================
     # REMOVED: CLAIMS, SECTIONS, DOSSIERS
     # These tables were dropped in v2 schema cleanup (2026-01-15)
-    # Claims/Sections stored in v2_pipeline_steps.output
+    # Claims/Sections stored in v2_pipeline_logs.output
     # Dossiers go to production via /publish
     # ========================================================================
 

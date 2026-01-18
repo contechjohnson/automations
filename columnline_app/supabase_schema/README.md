@@ -15,7 +15,7 @@ This folder contains human-readable documentation for each Supabase table used b
 | Table | Purpose | Notes |
 |-------|---------|-------|
 | `v2_runs` | Pipeline run metadata | One per dossier generation |
-| `v2_pipeline_steps` | Steps, stages, and all LLM executions | ~30-50 per run, includes event_type for stages |
+| `v2_pipeline_logs` | Steps, stages, and all LLM executions | ~30-50 per run, includes event_type for stages |
 | `v2_contacts` | Enriched contact records | ~5-20 per run |
 
 ### Production Tables (Published dossiers)
@@ -32,7 +32,7 @@ v2_clients (config)
      ↓
 v2_runs (start pipeline)
      ↓
-v2_pipeline_steps (each AI step + stage completions)
+v2_pipeline_logs (each AI step + stage completions)
      ↓
 v2_contacts (enriched contacts during run)
      ↓
@@ -45,17 +45,17 @@ dossiers + contacts (production tables)
 
 **As of 2026-01-18:**
 
-All step and stage data is stored in `v2_pipeline_steps`:
+All step and stage data is stored in `v2_pipeline_logs`:
 - **Steps:** Regular LLM calls (`event_type = 'step'`)
 - **Stages:** Pipeline stage boundaries (`event_type = 'stage_complete'`)
 
 This replaces the previous design with separate tables for claims, sections, etc.
 
 ### What Changed
-- `v2_claims` → stored in `v2_pipeline_steps.output`
-- `v2_merged_claims` → stored in `v2_pipeline_steps.output`
-- `v2_context_packs` → stored in `v2_pipeline_steps.output`
-- `v2_sections` → stored in `v2_pipeline_steps.output`
+- `v2_claims` → stored in `v2_pipeline_logs.output`
+- `v2_merged_claims` → stored in `v2_pipeline_logs.output`
+- `v2_context_packs` → stored in `v2_pipeline_logs.output`
+- `v2_sections` → stored in `v2_pipeline_logs.output`
 - `v2_dossiers` → goes directly to production `dossiers` table via /publish
 
 ## Notes from Author
@@ -63,9 +63,9 @@ This replaces the previous design with separate tables for claims, sections, etc
 **Last Updated:** 2026-01-18
 
 **Key Changes:**
-- Consolidated to 2 core execution tables: `v2_runs` + `v2_pipeline_steps`
-- Stage tracking via `event_type` column on `v2_pipeline_steps`
-- All step outputs stored as JSONB in `v2_pipeline_steps.output`
+- Consolidated to 2 core execution tables: `v2_runs` + `v2_pipeline_logs`
+- Stage tracking via `event_type` column on `v2_pipeline_logs`
+- All step outputs stored as JSONB in `v2_pipeline_logs.output`
 - Production dossiers go directly to `dossiers` table (no intermediate v2_dossiers)
 
 **Integration Notes:**

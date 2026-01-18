@@ -1,4 +1,4 @@
-# v2_pipeline_steps
+# v2_pipeline_logs
 
 **Layer:** Execution (30-50 per run)
 **Purpose:** Track individual step executions AND stage completions with inputs, outputs, and timing.
@@ -39,22 +39,22 @@
 ```sql
 -- All events for a run (chronological)
 SELECT event_type, step_name, status, started_at, completed_at, runtime_seconds
-FROM v2_pipeline_steps
+FROM v2_pipeline_logs
 WHERE run_id = 'RUN_...'
 ORDER BY started_at;
 
 -- Stage completions only
 SELECT step_name, runtime_seconds, completed_at
-FROM v2_pipeline_steps
+FROM v2_pipeline_logs
 WHERE run_id = 'RUN_...' AND event_type = 'stage_complete';
 
 -- Steps only (exclude stages)
 SELECT step_name, tokens_used, runtime_seconds
-FROM v2_pipeline_steps
+FROM v2_pipeline_logs
 WHERE run_id = 'RUN_...' AND event_type = 'step';
 
 -- Failed stages
-SELECT * FROM v2_pipeline_steps
+SELECT * FROM v2_pipeline_logs
 WHERE event_type = 'stage_complete' AND status = 'failed';
 ```
 

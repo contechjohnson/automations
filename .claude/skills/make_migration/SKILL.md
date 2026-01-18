@@ -12,9 +12,8 @@ The v2 Make.com → Supabase pipeline is **operational**. Key components:
 | API Routes | ✅ Active | `api/columnline/routes.py` |
 | Models | ✅ Active | `api/columnline/models.py` |
 | Repository | ✅ Active | `api/columnline/repository.py` |
-| Claims Merge | ✅ Active | `api/columnline/claims_merge.py` |
-| Prompts (v2) | ✅ Active | `columnline_app/api_migration/make_scenarios_and_supabase_tables/prompts_v2/` |
-| Table Docs | ✅ Active | `columnline_app/api_migration/make_scenarios_and_supabase_tables/supabase_tables/` |
+| Schema Docs | ✅ Active | `columnline_app/supabase_schema/` |
+| Prompts | ✅ Active | `prompts/v2/` |
 
 ---
 
@@ -23,10 +22,8 @@ The v2 Make.com → Supabase pipeline is **operational**. Key components:
 | Path | Purpose |
 |------|---------|
 | `api/columnline/` | **Active API code** - routes, models, repository |
-| `columnline_app/api_migration/make_scenarios_and_supabase_tables/` | Make.com exports + table docs |
-| `columnline_app/api_migration/make_scenarios_and_supabase_tables/prompts_v2/` | **Active prompts** (sync to v2_prompts table) |
-| `columnline_app/api_migration/make_scenarios_and_supabase_tables/supabase_tables/` | Human-readable table documentation |
-| `columnline_app/api_migration/_archive/` | Archived CSVs, old docs (historical only) |
+| `columnline_app/supabase_schema/` | Human-readable table documentation |
+| `prompts/v2/` | **Active prompts** (sync to v2_prompts table) |
 
 ---
 
@@ -43,15 +40,17 @@ The v2 Make.com → Supabase pipeline is **operational**. Key components:
 | Table | Purpose |
 |-------|---------|
 | `v2_runs` | Pipeline run metadata |
-| `v2_dossiers` | Final assembled dossiers |
-| `v2_pipeline_steps` | Individual step executions |
-| `v2_claims` | Extracted claims from research |
-| `v2_merged_claims` | Consolidated claims (patches applied) |
-| `v2_context_packs` | Compressed context for downstream |
-| `v2_sections` | Written dossier sections |
+| `v2_pipeline_logs` | Steps + stages (all LLM calls and stage completions) |
 | `v2_contacts` | Enriched contact records |
 
-See `supabase_tables/*.md` for detailed docs on each table.
+### Production Tables (Published dossiers)
+| Table | Purpose |
+|-------|---------|
+| `dossiers` | Published dossiers (created by /publish) |
+| `contacts` | Published contacts (created by /publish) |
+| `batches` | Batch tracking |
+
+See `columnline_app/supabase_schema/*.md` for detailed docs on each table.
 
 ---
 
@@ -60,10 +59,13 @@ See `supabase_tables/*.md` for detailed docs on each table.
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/columnline/configs/{client_id}` | GET | Fetch client config + all prompts |
-| `/columnline/runs` | POST | Create new pipeline run |
+| `/columnline/runs/start` | POST | Create new pipeline run |
 | `/columnline/steps/prepare` | POST | Prepare step input + return prompt |
 | `/columnline/steps/complete` | POST | Store step output |
 | `/columnline/steps/transition` | POST | Complete + prepare next (combined) |
+| `/columnline/stages/start` | POST | Log stage start |
+| `/columnline/stages/complete` | POST | Log stage completion |
+| `/columnline/publish/{run_id}` | POST | Publish to production tables |
 
 ---
 
@@ -75,11 +77,13 @@ Downstream steps receive BOTH:
 - `entity_research_claims` + `entity_research_narrative`
 - etc.
 
-### Patch-Based Merge
-Instead of LLM rewriting all claims:
-1. LLM generates ~20 targeted patches
-2. Python code applies patches programmatically
-3. More efficient, preserves originals, transparent
+### Stage Logging
+Pipeline stages logged to `v2_pipeline_logs` with `event_type = 'stage_complete'`:
+- Stage 1: search_signal
+- Stage 2: entity_research
+- Stage 3: parallel_research
+- Stage 4: parallel_agents
+- Stage 5: publish
 
 ### Model Usage
 | Model | Use Case |
@@ -90,39 +94,19 @@ Instead of LLM rewriting all claims:
 
 ---
 
-## Make.com Blueprint Files
-
-Raw exports from Make.com (for reference/parsing):
-
-| File | Scenario |
-|------|----------|
-| `MAIN_DOSSIER_PIPELINE.json` | Master orchestrator |
-| `01AND02_SEARCH_AND_SIGNAL.blueprint.json` | Search + Signal Discovery |
-| `03_AND_04_SEQUENTIAL_DEEP_RESEARCH_STEPS.blueprint.json` | Entity + Contact Research |
-| `05A_ENRICH_LEAD.blueprint.json` | Lead Enrichment |
-| `05B_ENRICH_OPPORTUNITY.blueprint.json` | Opportunity Enrichment |
-| `05C_CLIENT_SPECIFIC.blueprint.json` | Client-Specific Research |
-| `06_ENRICH_CONTACTS.blueprint.json` | Contact Enrichment |
-| `07B_INSIGHT.blueprint.json` | Insight + Claims Merge |
-| `08_MEDIA.blueprint.json` | Media/Images |
-| `09_DOSSIER_PLAN.blueprint.json` | Dossier Planning |
-| `WRITER_*.blueprint.json` | Section Writers (6 files) |
-
-Use `/parsing-make-blueprints` skill to parse these into business logic docs.
-
----
-
 ## Quick Reference
 
 ### Test Run
 ```bash
-# Get latest IDs
-curl "https://api.columnline.dev/columnline/runs?limit=1"
+# Start a run
+curl -X POST "https://api.columnline.dev/columnline/runs/start" \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "CLT_...", "seed_data": {"company_name": "Acme"}}'
 
 # Prepare a step
 curl -X POST "https://api.columnline.dev/columnline/steps/prepare" \
   -H "Content-Type: application/json" \
-  -d '{"run_id": "RUN_...", "client_id": "CLT_...", "step_names": ["2_SIGNAL_DISCOVERY"]}'
+  -d '{"run_id": "RUN_...", "client_id": "CLT_...", "dossier_id": "DOS_...", "step_names": ["2_SIGNAL_DISCOVERY"]}'
 ```
 
 ### Deploy Changes
@@ -130,18 +114,3 @@ curl -X POST "https://api.columnline.dev/columnline/steps/prepare" \
 git add -A && git commit -m "..." && git push
 # GitHub Actions auto-deploys to api.columnline.dev
 ```
-
-### Clear Test Data
-Use the clear script: `tmp/clear_v2_runs.py`
-
----
-
-## Next Steps (Integration)
-
-When ready to render dossiers in Columnline app:
-1. Add `production_client_id` column to `v2_clients`
-2. Create transform layer (`v2_dossiers` → production `dossiers` table)
-3. Add `/columnline/publish/{run_id}` endpoint
-4. Map v2 JSONB output to production schema
-
-See plan notes in `~/.claude/plans/` for full integration strategy.

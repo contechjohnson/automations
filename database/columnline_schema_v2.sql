@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS v2_runs (
 -- 4. PIPELINE STEPS (THE KEY TABLE)
 -- Detailed logging of each pipeline step execution
 -- All claims, sections, dossier data stored in output JSONB
-CREATE TABLE IF NOT EXISTS v2_pipeline_steps (
+CREATE TABLE IF NOT EXISTS v2_pipeline_logs (
     step_id TEXT PRIMARY KEY,
     run_id TEXT REFERENCES v2_runs(run_id),
     prompt_id TEXT REFERENCES v2_prompts(prompt_id),
@@ -225,10 +225,10 @@ CREATE INDEX IF NOT EXISTS idx_v2_runs_status ON v2_runs(status);
 CREATE INDEX IF NOT EXISTS idx_v2_runs_dossier_id ON v2_runs(dossier_id);
 
 -- Pipeline steps queries (most frequent)
-CREATE INDEX IF NOT EXISTS idx_v2_pipeline_steps_run_id ON v2_pipeline_steps(run_id);
-CREATE INDEX IF NOT EXISTS idx_v2_pipeline_steps_status ON v2_pipeline_steps(run_id, status);
-CREATE INDEX IF NOT EXISTS idx_v2_pipeline_steps_step_name ON v2_pipeline_steps(run_id, step_name);
-CREATE INDEX IF NOT EXISTS idx_v2_pipeline_steps_completed ON v2_pipeline_steps(run_id, step_name, status)
+CREATE INDEX IF NOT EXISTS idx_v2_pipeline_logs_run_id ON v2_pipeline_logs(run_id);
+CREATE INDEX IF NOT EXISTS idx_v2_pipeline_logs_status ON v2_pipeline_logs(run_id, status);
+CREATE INDEX IF NOT EXISTS idx_v2_pipeline_logs_step_name ON v2_pipeline_logs(run_id, step_name);
+CREATE INDEX IF NOT EXISTS idx_v2_pipeline_logs_completed ON v2_pipeline_logs(run_id, step_name, status)
     WHERE status = 'completed';
 
 -- Contacts queries
@@ -242,7 +242,7 @@ CREATE INDEX IF NOT EXISTS idx_v2_contacts_run_id ON v2_contacts(run_id);
 COMMENT ON TABLE v2_clients IS 'Client configurations and compressed context for dossier generation';
 COMMENT ON TABLE v2_prompts IS 'Template storage for all 31 pipeline prompts (model selection handled by Make.com)';
 COMMENT ON TABLE v2_runs IS 'Individual dossier run tracking with per-run isolation';
-COMMENT ON TABLE v2_pipeline_steps IS 'THE KEY TABLE - All step inputs/outputs stored here (claims, sections, dossier data)';
+COMMENT ON TABLE v2_pipeline_logs IS 'THE KEY TABLE - All step inputs/outputs stored here (claims, sections, dossier data)';
 COMMENT ON TABLE v2_contacts IS 'Contact records for observability (dual-write from /publish)';
 COMMENT ON TABLE v2_onboarding IS 'Future: Client onboarding conversations and config generation';
 COMMENT ON TABLE v2_prep_inputs IS 'Future: Config compression for token savings';
