@@ -15,13 +15,15 @@ This folder contains human-readable documentation for each Supabase table used b
 | Table | Purpose | Notes |
 |-------|---------|-------|
 | `v2_runs` | Pipeline run metadata | One per dossier generation |
-| `v2_dossiers` | Final assembled dossiers | Created at assembly step |
-| `v2_pipeline_steps` | Individual step executions | ~30-50 per run |
-| `v2_claims` | Extracted claims from research | ~100-300 per run |
-| `v2_merged_claims` | Consolidated/patched claims | After MERGE_CLAIMS step |
-| `v2_context_packs` | Compressed context for later steps | One per run |
-| `v2_sections` | Written dossier sections | ~8 per run |
+| `v2_pipeline_steps` | Steps, stages, and all LLM executions | ~30-50 per run, includes event_type for stages |
 | `v2_contacts` | Enriched contact records | ~5-20 per run |
+
+### Production Tables (Published dossiers)
+| Table | Purpose | Notes |
+|-------|---------|-------|
+| `dossiers` | Published dossiers | Created by /publish endpoint |
+| `contacts` | Published contacts | Created by /publish endpoint |
+| `batches` | Batch tracking | Linked to dossiers |
 
 ## Data Flow
 
@@ -30,32 +32,43 @@ v2_clients (config)
      ↓
 v2_runs (start pipeline)
      ↓
-v2_pipeline_steps (each AI step)
+v2_pipeline_steps (each AI step + stage completions)
      ↓
-v2_claims (extracted from research steps)
+v2_contacts (enriched contacts during run)
      ↓
-v2_merged_claims (patches applied)
+/publish endpoint
      ↓
-v2_context_packs (compressed for downstream)
-     ↓
-v2_sections (written by section writers)
-     ↓
-v2_contacts (enriched contacts)
-     ↓
-v2_dossiers (final assembly)
+dossiers + contacts (production tables)
 ```
+
+## Consolidated Design
+
+**As of 2026-01-18:**
+
+All step and stage data is stored in `v2_pipeline_steps`:
+- **Steps:** Regular LLM calls (`event_type = 'step'`)
+- **Stages:** Pipeline stage boundaries (`event_type = 'stage_complete'`)
+
+This replaces the previous design with separate tables for claims, sections, etc.
+
+### What Changed
+- `v2_claims` → stored in `v2_pipeline_steps.output`
+- `v2_merged_claims` → stored in `v2_pipeline_steps.output`
+- `v2_context_packs` → stored in `v2_pipeline_steps.output`
+- `v2_sections` → stored in `v2_pipeline_steps.output`
+- `v2_dossiers` → goes directly to production `dossiers` table via /publish
 
 ## Notes from Author
 
-**Last Updated:** 2026-01-15
+**Last Updated:** 2026-01-18
 
 **Key Changes:**
-- All data now lives in Supabase (no more Google Sheets CSVs)
-- Claims extraction preserves context (mini-narratives, not atomic facts)
-- Merge claims uses patch-based approach (not full rewrite)
-- Narratives + claims both passed to downstream steps
+- Consolidated to 2 core execution tables: `v2_runs` + `v2_pipeline_steps`
+- Stage tracking via `event_type` column on `v2_pipeline_steps`
+- All step outputs stored as JSONB in `v2_pipeline_steps.output`
+- Production dossiers go directly to `dossiers` table (no intermediate v2_dossiers)
 
 **Integration Notes:**
 - API routes in `/api/columnline/` read/write these tables
 - Make.com calls API endpoints (never direct Supabase access)
-- All step outputs stored as JSONB for flexibility
+- Stage endpoints: `POST /stages/start`, `POST /stages/complete`

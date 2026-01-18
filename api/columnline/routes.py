@@ -20,6 +20,9 @@ from .models import (
     StepPrepareRequest, StepPrepareResponse, PreparedStep,
     StepCompleteRequest, StepCompleteResponse, StepOutputItem,
     StepTransitionRequest, StepTransitionResponse,
+    # Stage Logging
+    StageStartRequest, StageStartResponse,
+    StageCompleteRequest, StageCompleteResponse,
     # Batch Composer
     BatchStartRequest, BatchStartResponse,
     BatchPrepareRequest, BatchPrepareResponse,
@@ -1522,6 +1525,164 @@ async def transition_step(request: StepTransitionRequest):
         tokens_used=parsed['tokens_used'],
         runtime_seconds=parsed['runtime_seconds'],
         next_step=next_step_prepared
+    )
+
+
+# ============================================================================
+# STAGE LOGGING ENDPOINTS
+# ============================================================================
+
+# Stage name mapping for consistent naming
+STAGE_NAMES = {
+    1: "search_signal",
+    2: "entity_research",
+    3: "parallel_research",
+    4: "parallel_agents",
+    5: "publish"
+}
+
+
+@router.post("/stages/start", response_model=StageStartResponse)
+async def stage_start(request: StageStartRequest):
+    """
+    Log the start of a pipeline stage.
+
+    Inserts a row into v2_pipeline_steps with event_type='stage_start'.
+    Called by Make.com Prime Pipeline before each stage begins.
+    """
+    import uuid
+
+    # Validate stage name matches expected
+    expected_name = STAGE_NAMES.get(request.stage_number)
+    if expected_name and request.stage_name != expected_name:
+        # Warn but allow - use provided name
+        pass
+
+    step_id = f"STAGE_{uuid.uuid4().hex[:8].upper()}"
+    step_name = f"STAGE_{request.stage_number}_{request.stage_name.upper()}"
+    now = datetime.utcnow()
+
+    # Insert into v2_pipeline_steps with event_type
+    step_data = {
+        "step_id": step_id,
+        "run_id": request.run_id,
+        "prompt_id": None,  # Stages don't have prompts
+        "step_name": step_name,
+        "status": "running",
+        "event_type": "stage_start",
+        "input": {
+            "stage_number": request.stage_number,
+            "stage_name": request.stage_name
+        },
+        "started_at": now.isoformat()
+    }
+
+    repo.create_pipeline_step(step_data)
+
+    return StageStartResponse(
+        success=True,
+        step_id=step_id,
+        run_id=request.run_id,
+        stage_number=request.stage_number,
+        stage_name=request.stage_name,
+        started_at=now,
+        message=f"Stage {request.stage_number} ({request.stage_name}) started"
+    )
+
+
+@router.post("/stages/complete", response_model=StageCompleteResponse)
+async def stage_complete(request: StageCompleteRequest):
+    """
+    Log the completion of a pipeline stage.
+
+    Updates the stage_start row OR inserts a stage_complete row.
+    Called by Make.com Prime Pipeline after each stage's polling completes.
+    """
+    now = datetime.utcnow()
+
+    # Find the stage_start row to calculate duration
+    stage_name = STAGE_NAMES.get(request.stage_number, f"stage_{request.stage_number}")
+    step_name_pattern = f"STAGE_{request.stage_number}_%"
+
+    # Look for the running stage_start row
+    result = repo.client.table('v2_pipeline_steps').select('*').eq(
+        'run_id', request.run_id
+    ).eq(
+        'event_type', 'stage_start'
+    ).eq(
+        'status', 'running'
+    ).ilike(
+        'step_name', step_name_pattern
+    ).execute()
+
+    started_at = None
+    duration_seconds = None
+    step_id = None
+
+    if result.data:
+        # Found the stage_start row - update it
+        stage_row = result.data[0]
+        step_id = stage_row['step_id']
+        started_at_str = stage_row.get('started_at')
+
+        if started_at_str:
+            started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00').replace('+00:00', ''))
+            duration_seconds = (now - started_at).total_seconds()
+
+        # Determine status
+        status = "failed" if request.error_message else "completed"
+
+        # Update the row
+        update_data = {
+            "status": status,
+            "completed_at": now.isoformat(),
+            "runtime_seconds": duration_seconds,
+            "event_type": "stage_complete"  # Change from stage_start to stage_complete
+        }
+
+        if request.error_message:
+            update_data["error_message"] = request.error_message
+
+        repo.update_pipeline_step(step_id, update_data)
+
+        # Get stage_name from the row
+        stage_name = stage_row.get('input', {}).get('stage_name', stage_name)
+
+    else:
+        # No stage_start found - insert a stage_complete row directly
+        import uuid
+        step_id = f"STAGE_{uuid.uuid4().hex[:8].upper()}"
+
+        status = "failed" if request.error_message else "completed"
+
+        step_data = {
+            "step_id": step_id,
+            "run_id": request.run_id,
+            "prompt_id": None,
+            "step_name": f"STAGE_{request.stage_number}_{stage_name.upper()}",
+            "status": status,
+            "event_type": "stage_complete",
+            "input": {
+                "stage_number": request.stage_number,
+                "stage_name": stage_name
+            },
+            "completed_at": now.isoformat(),
+            "error_message": request.error_message
+        }
+
+        repo.create_pipeline_step(step_data)
+
+    return StageCompleteResponse(
+        success=True,
+        step_id=step_id,
+        run_id=request.run_id,
+        stage_number=request.stage_number,
+        stage_name=stage_name,
+        started_at=started_at,
+        completed_at=now,
+        duration_seconds=duration_seconds,
+        status="failed" if request.error_message else "completed",
+        message=f"Stage {request.stage_number} ({stage_name}) {'failed' if request.error_message else 'completed'}"
     )
 
 

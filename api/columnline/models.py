@@ -472,6 +472,66 @@ class OnboardCompleteResponse(BaseModel):
 
 
 # ============================================================================
+# STAGE LOGGING MODELS
+# ============================================================================
+
+class StageStartRequest(BaseModel):
+    """Start logging a pipeline stage"""
+    run_id: str
+    stage_number: int = Field(..., ge=1, le=5, description="Stage number (1-5)")
+    stage_name: str = Field(..., description="Stage name: search_signal, entity_research, parallel_research, parallel_agents, publish")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "run_id": "RUN_abc123",
+                "stage_number": 1,
+                "stage_name": "search_signal"
+            }
+        }
+
+
+class StageStartResponse(BaseModel):
+    """Response from starting a stage"""
+    success: bool = True
+    step_id: str
+    run_id: str
+    stage_number: int
+    stage_name: str
+    started_at: datetime
+    message: str = "Stage started successfully"
+
+
+class StageCompleteRequest(BaseModel):
+    """Complete a pipeline stage"""
+    run_id: str
+    stage_number: int = Field(..., ge=1, le=5, description="Stage number (1-5)")
+    error_message: Optional[str] = Field(default=None, description="Error message if stage failed")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "run_id": "RUN_abc123",
+                "stage_number": 1
+            }
+        }
+
+
+class StageCompleteResponse(BaseModel):
+    """Response from completing a stage"""
+    success: bool = True
+    step_id: str
+    run_id: str
+    stage_number: int
+    stage_name: str
+    started_at: Optional[datetime] = None
+    completed_at: datetime
+    duration_seconds: Optional[float] = None
+    status: str = "completed"
+    message: str = "Stage completed successfully"
+
+
+# ============================================================================
 # PUBLISH TO PRODUCTION MODELS
 # ============================================================================
 
