@@ -1292,6 +1292,11 @@ async def transition_step(request: StepTransitionRequest):
             if output:
                 step_input[key] = extract_clean_content(output.get('output'))
 
+        # Client context for composer prompt
+        step_input["client_name"] = client.get('client_name', '')
+        step_input["client_services"] = client.get('services', client.get('client_services', ''))
+        step_input["client_differentiators"] = client.get('differentiators', client.get('client_differentiators', ''))
+
         # Pre-calculated scores from enrich_lead
         enrich_lead = step_input.get("enrich_lead_output", {})
         if isinstance(enrich_lead, dict):
@@ -1301,6 +1306,13 @@ async def transition_step(request: StepTransitionRequest):
                 step_input["timing_urgency"] = enrich_lead["timing_urgency"]
             if enrich_lead.get("score_explanation"):
                 step_input["score_explanation"] = enrich_lead["score_explanation"]
+
+        # Fallback to seed_data if scores not in enrich_lead
+        seed = run.get("seed_data", {}) or {}
+        if not step_input.get("lead_score") and seed.get("lead_score"):
+            step_input["lead_score"] = seed["lead_score"]
+        if not step_input.get("timing_urgency") and seed.get("timing_urgency"):
+            step_input["timing_urgency"] = seed["timing_urgency"]
 
     # Get model
     model_map = {
