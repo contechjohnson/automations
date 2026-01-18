@@ -943,8 +943,7 @@ async def prepare_steps(request: StepPrepareRequest):
             prompt_slug=prompt['prompt_slug'],
             prompt_template=prompt['prompt_template'],
             model_used=model_used,
-            input=step_input,
-            produce_claims=prompt.get('produce_claims', False)
+            input=step_input
         ))
 
         # Log step as "running" in database
@@ -1526,8 +1525,7 @@ async def transition_step(request: StepTransitionRequest):
         prompt_slug=prompt['prompt_slug'],
         prompt_template=prompt['prompt_template'],
         model_used=model_used,
-        input=step_input,
-        produce_claims=prompt.get('produce_claims', False)
+        input=step_input
     )
 
     return StepTransitionResponse(

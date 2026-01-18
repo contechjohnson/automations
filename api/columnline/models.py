@@ -159,10 +159,6 @@ class PromptConfig(BaseModel):
     stage: Optional[str] = None
     step: Optional[str] = None
     prompt_template: str
-    produce_claims: bool = False
-    context_pack_produced: bool = False
-    variables_used: Optional[List[str]] = None
-    variables_produced: Optional[List[str]] = None
 
 
 class ConfigsResponse(BaseModel):
@@ -222,7 +218,6 @@ class PreparedStep(BaseModel):
     prompt_template: str
     model_used: str
     input: Dict[str, Any]
-    produce_claims: bool
 
 
 class StepPrepareResponse(BaseModel):
