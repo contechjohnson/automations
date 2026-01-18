@@ -2612,21 +2612,175 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'status': 'published'
     })
 
-    # Build rendered object with all dossier data for inspection
+    # Build rendered object in V1 UI format (matches DossierView.tsx expectations)
+    # This mirrors the transformDossier function in web/lib/transforms.ts
+    primary_signal = find_lead.get('primary_buying_signal', {})
+    company_snapshot = find_lead.get('company_snapshot', {})
+    company_deep_dive = enrich_lead.get('company_deep_dive', {})
+    network_intel = enrich_lead.get('network_intelligence', {})
+    the_math = insight_data.get('the_math', {})
+    competitive = insight_data.get('competitive_positioning', {})
+    decision_making = insight_data.get('decision_making_process', {})
+    deal_strat = insight_data.get('deal_strategy', {})
+
+    # Build whyNow signals array
+    why_now_signals = []
+    if primary_signal:
+        why_now_signals.append({
+            'signal': primary_signal.get('signal', ''),
+            'happening': primary_signal.get('description', ''),
+            'proof': {
+                'text': primary_signal.get('source_name', ''),
+                'url': primary_signal.get('source_url', '')
+            }
+        })
+    for sig in enrich_lead.get('additional_signals', []):
+        why_now_signals.append({
+            'signal': sig.get('signal', ''),
+            'happening': sig.get('description', ''),
+            'proof': {
+                'text': sig.get('source_name', ''),
+                'url': sig.get('source_url', '')
+            }
+        })
+
+    # Build emailScripts from copy outreach
+    email_scripts = []
+    for idx, o in enumerate(copy_data.get('outreach', [])):
+        email_scripts.append({
+            'id': o.get('contact_id', f'script-{idx}'),
+            'targetName': o.get('target_name', ''),
+            'subject': o.get('email_subject', ''),
+            'body': o.get('email_body', ''),
+            'linkedinMessage': o.get('linkedin_message', '')
+        })
+
+    # Build contacts in V1 format
+    v1_contacts = []
+    for idx, c in enumerate(contacts_list):
+        if not isinstance(c, dict):
+            continue
+        contact_name = c.get('name', '')
+        if not contact_name:
+            contact_name = f"{c.get('first_name', '')} {c.get('last_name', '')}".strip() or 'Unknown'
+        v1_contacts.append({
+            'id': c.get('id', f'contact-{idx}'),
+            'name': contact_name,
+            'role': c.get('title') or c.get('role', ''),
+            'email': c.get('email', ''),
+            'linkedin': c.get('linkedin_url') or c.get('linkedin', ''),
+            'phone': c.get('phone', ''),
+            'bio': c.get('why_they_matter') or c.get('bio_paragraph', ''),
+            'highlight': 'PRIMARY' if idx == 0 else ''
+        })
+
     rendered = {
-        'company_name': company_name,
-        'company_domain': company_domain,
-        'find_lead': find_lead,
-        'enrich_lead': enrich_lead,
-        'copy': copy_data,
-        'insight': insight_data,
+        # Header fields
+        'companyName': company_name,
+        'domain': company_domain,
+        'whatTheyDo': find_lead.get('what_they_do') or company_snapshot.get('description', ''),
+        'theAngle': find_lead.get('the_angle', ''),
+        'leadScore': find_lead.get('lead_score', 0),
+        'explanation': find_lead.get('score_explanation', ''),
+        'urgency': find_lead.get('timing_urgency', 'Medium'),
+        'timingContext': find_lead.get('one_liner', ''),
+
+        # Signals
+        'whyNow': why_now_signals,
+
+        # The Math (structured)
+        'theMathStructured': {
+            'theirReality': the_math.get('their_reality', ''),
+            'theOpportunity': the_math.get('the_opportunity', ''),
+            'translation': the_math.get('translation', ''),
+            'bottomLine': the_math.get('bottom_line', '')
+        } if the_math else None,
+
+        # Company Intel
+        'companyIntel': {
+            'summary': company_deep_dive.get('description') or company_deep_dive.get('company_overview') or company_snapshot.get('description', ''),
+            'numbers': [
+                f"{company_deep_dive.get('employees', '')} employees" if company_deep_dive.get('employees') else None,
+                company_deep_dive.get('revenue'),
+                f"Founded {company_deep_dive.get('founded_year')}" if company_deep_dive.get('founded_year') else None,
+            ],
+            'mainlinePhones': company_deep_dive.get('mainline_phones', []),
+            'generalEmails': company_deep_dive.get('general_emails', [])
+        },
+
+        # Opportunity Intelligence (V2)
+        'opportunityIntelligence': find_lead.get('opportunity_intelligence'),
+
+        # Custom Research (V2)
+        'customResearch': find_lead.get('custom_research'),
+
+        # Corporate Structure
+        'corporateStructure': enrich_lead.get('corporate_structure'),
+
+        # Network Intelligence
+        'networkIntelligence': {
+            'warmPathsIn': [
+                {
+                    'title': wp.get('name') or wp.get('title', ''),
+                    'description': wp.get('title') or wp.get('role', ''),
+                    'approach': wp.get('approach', ''),
+                    'connectionToTargets': wp.get('linkedin_url') or wp.get('connection_to_targets', '')
+                }
+                for wp in (network_intel.get('warm_paths') or network_intel.get('warm_intro_paths') or [])
+            ],
+            'associations': network_intel.get('associations', []),
+            'partnerships': network_intel.get('partnerships', []),
+            'conferences': network_intel.get('conferences', []),
+            'awards': network_intel.get('awards', [])
+        },
+
+        # Competitive Positioning
+        'competitivePositioning': {
+            'whatTheyDontKnow': competitive.get('insights_they_dont_know', []),
+            'landminesToAvoid': competitive.get('landmines_to_avoid', [])
+        },
+
+        # Deal Strategy
+        'dealStrategy': {
+            'howTheyBuy': deal_strat.get('how_they_buy', ''),
+            'uniqueValue': deal_strat.get('unique_value', [])
+        },
+
+        # Decision Strategy
+        'decisionStrategy': {
+            'companyType': decision_making.get('company_type', ''),
+            'organizationalStructure': decision_making.get('organizational_structure', ''),
+            'keyRoles': decision_making.get('key_roles', []),
+            'typicalProcess': decision_making.get('typical_process', ''),
+            'entryPoints': decision_making.get('entry_points', [])
+        },
+
+        # Common Objections
+        'commonObjections': copy_data.get('objections', []),
+
+        # Quick Reference
+        'quickReference': {
+            'conversationStarters': copy_data.get('conversation_starters', [])
+        },
+
+        # Contacts
+        'contacts': v1_contacts,
+
+        # Email Scripts
+        'emailScripts': email_scripts,
+
+        # Media
         'media': media_data,
-        'sections': sections,
-        'contacts': contacts_list,
-        'lead_score': find_lead.get('lead_score', 0),
-        'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
-        'primary_signal': find_lead.get('primary_buying_signal', {}).get('signal', ''),
+
+        # Sources
+        'sources': insight_data.get('sources', []),
+
+        # Dynamic sections (if present)
+        'sections': sections
     }
+
+    # Clean up None values from companyIntel.numbers
+    rendered['companyIntel']['numbers'] = [n for n in rendered['companyIntel']['numbers'] if n]
 
     return PublishResponse(
         success=True,
