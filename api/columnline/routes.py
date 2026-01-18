@@ -3005,14 +3005,15 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'media': media_data,
 
         # Sources
-        'sources': insight_data.get('sources', []),
+        'sources': (insight_data.get('sources') or []) if insight_data else [],
 
         # Dynamic sections (if present)
         'sections': sections
     }
 
     # Clean up None values from companyIntel.numbers
-    rendered['companyIntel']['numbers'] = [n for n in rendered['companyIntel']['numbers'] if n]
+    if rendered.get('companyIntel') and rendered['companyIntel'].get('numbers'):
+        rendered['companyIntel']['numbers'] = [n for n in rendered['companyIntel']['numbers'] if n]
 
     return PublishResponse(
         success=True,
