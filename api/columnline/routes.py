@@ -10,6 +10,7 @@ from typing import Optional
 from datetime import datetime
 
 from .repository import ColumnlineRepository
+from .pricing import calculate_cost
 from .models import (
     RunStartRequest, RunStartResponse,
     RunCreate, RunUpdate, RunStatus,
@@ -49,9 +50,10 @@ repo = ColumnlineRepository()
 
 def parse_openai_response(openai_output):
     """
-    Parse OpenAI API response to extract text, tokens, and runtime
+    Parse OpenAI API response to extract text, tokens, model, and runtime
 
-    Handles both array format and single response format
+    Handles both array format and single response format.
+    Extracts input_tokens and output_tokens separately for cost calculation.
     """
     # If it's an array, take first element
     if isinstance(openai_output, list):
@@ -68,13 +70,19 @@ def parse_openai_response(openai_output):
             if content and 'text' in content[0]:
                 response_text = content[0]['text']
 
-    # Extract tokens
+    # Extract tokens (detailed breakdown)
+    input_tokens = 0
+    output_tokens = 0
     tokens_used = 0
     if 'usage' in openai_output:
         usage = openai_output['usage']
-        tokens_used = usage.get('total_tokens', 0)
-        if tokens_used == 0:
-            tokens_used = usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
+        # OpenAI uses both naming conventions depending on API
+        input_tokens = usage.get('input_tokens', usage.get('prompt_tokens', 0))
+        output_tokens = usage.get('output_tokens', usage.get('completion_tokens', 0))
+        tokens_used = usage.get('total_tokens', input_tokens + output_tokens)
+
+    # Extract actual model from response (may differ from requested model)
+    model_used = openai_output.get('model', None)
 
     # Calculate runtime (completed_at - created_at)
     runtime_seconds = 0
@@ -91,6 +99,9 @@ def parse_openai_response(openai_output):
     return {
         "text": response_text,
         "tokens_used": tokens_used,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "model_used": model_used,
         "runtime_seconds": runtime_seconds,
         "full_output": openai_output  # Store full response for debugging
     }
@@ -1040,25 +1051,38 @@ async def complete_steps(request: StepCompleteRequest):
             print(f"[COMPLETE] ERROR: Step not found: {output_item.step_id or output_item.step_name}")
             raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_id or output_item.step_name}")
 
-        # AUTO-PARSE: If tokens/runtime not provided, extract from output
-        tokens_used = output_item.tokens_used
-        runtime_seconds = output_item.runtime_seconds
-        output_to_store = output_item.output
+        # AUTO-PARSE: Extract tokens, runtime, model, and calculate cost
+        parsed = parse_openai_response(output_item.output)
+        tokens_used = output_item.tokens_used if output_item.tokens_used is not None else parsed['tokens_used']
+        runtime_seconds = output_item.runtime_seconds if output_item.runtime_seconds is not None else parsed['runtime_seconds']
+        output_to_store = parsed['full_output']
 
-        if tokens_used is None or runtime_seconds is None:
-            parsed = parse_openai_response(output_item.output)
-            tokens_used = parsed['tokens_used'] if tokens_used is None else tokens_used
-            runtime_seconds = parsed['runtime_seconds'] if runtime_seconds is None else runtime_seconds
-            output_to_store = parsed['full_output']
+        # Extract detailed token info and model for cost calculation
+        input_tokens = parsed['input_tokens']
+        output_tokens = parsed['output_tokens']
+        model_used = parsed['model_used'] or step.get('model_used')  # Fallback to step's model if not in response
 
-        # Update step to completed
+        # Calculate estimated cost
+        estimated_cost = 0.0
+        if model_used and (input_tokens > 0 or output_tokens > 0):
+            estimated_cost = calculate_cost(model_used, input_tokens, output_tokens)
+
+        # Update step to completed with cost tracking
         repo.update_pipeline_step(step['step_id'], {
             "status": "completed",
             "output": output_to_store,
             "tokens_used": tokens_used,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "model_used": model_used,
+            "estimated_cost": estimated_cost,
             "runtime_seconds": runtime_seconds,
             "completed_at": datetime.now().isoformat()
         })
+
+        # Increment run totals
+        if tokens_used > 0 or estimated_cost > 0:
+            repo.increment_run_costs(request.run_id, tokens_used, estimated_cost)
 
         completed_steps.append(output_item.step_name)
 
@@ -1192,16 +1216,35 @@ async def transition_step(request: StepTransitionRequest):
         # Not in "running" status - try to find it with any status
         result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).execute()
 
-    # If we found the step, update it to completed
+    # If we found the step, update it to completed with cost tracking
     if result.data:
         completed_step = result.data[0]
+
+        # Extract detailed token info and model for cost calculation
+        input_tokens = parsed['input_tokens']
+        output_tokens = parsed['output_tokens']
+        model_used = parsed['model_used'] or completed_step.get('model_used')
+
+        # Calculate estimated cost
+        estimated_cost = 0.0
+        if model_used and (input_tokens > 0 or output_tokens > 0):
+            estimated_cost = calculate_cost(model_used, input_tokens, output_tokens)
+
         repo.update_pipeline_step(completed_step['step_id'], {
             "status": "completed",
-            "output": parsed['full_output'],  # Store full response
+            "output": parsed['full_output'],
             "tokens_used": parsed['tokens_used'],
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "model_used": model_used,
+            "estimated_cost": estimated_cost,
             "runtime_seconds": parsed['runtime_seconds'],
             "completed_at": datetime.now().isoformat()
         })
+
+        # Increment run totals
+        if parsed['tokens_used'] > 0 or estimated_cost > 0:
+            repo.increment_run_costs(request.run_id, parsed['tokens_used'], estimated_cost)
     # If step doesn't exist at all, that's okay - just proceed to create the next one
 
     # Now prepare the next step (same logic as /steps/prepare but for one step)

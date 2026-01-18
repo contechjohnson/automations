@@ -18,6 +18,9 @@
 | `input` | JSONB | Input data passed to the step |
 | `output` | JSONB | Full output from the step (LLM response) |
 | `tokens_used` | INTEGER | Total tokens (input + output) |
+| `input_tokens` | INTEGER | Input/prompt tokens from OpenAI response |
+| `output_tokens` | INTEGER | Output/completion tokens from OpenAI response |
+| `estimated_cost` | NUMERIC(10,6) | Estimated cost in USD based on model pricing |
 | `runtime_seconds` | FLOAT | Step execution time |
 | `model_used` | TEXT | Model used (e.g., `gpt-4.1`, `o4-mini-deep-research`) |
 | `started_at` | TIMESTAMP | Step start time |
@@ -56,6 +59,22 @@ WHERE run_id = 'RUN_...' AND event_type = 'step';
 -- Failed stages
 SELECT * FROM v2_pipeline_logs
 WHERE event_type = 'stage_complete' AND status = 'failed';
+
+-- Cost per step for a run
+SELECT step_name, model_used, input_tokens, output_tokens,
+       estimated_cost, runtime_seconds
+FROM v2_pipeline_logs
+WHERE run_id = 'RUN_...' AND event_type = 'step'
+ORDER BY started_at;
+
+-- Cost breakdown by model for a run
+SELECT model_used,
+       SUM(input_tokens) as total_input,
+       SUM(output_tokens) as total_output,
+       SUM(estimated_cost) as total_cost
+FROM v2_pipeline_logs
+WHERE run_id = 'RUN_...' AND event_type = 'step'
+GROUP BY model_used;
 ```
 
 ---

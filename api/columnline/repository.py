@@ -70,6 +70,24 @@ class ColumnlineRepository:
         result = self.client.table('v2_runs').update(updates).eq('run_id', run_id).execute()
         return result.data[0]
 
+    def increment_run_costs(self, run_id: str, tokens: int, cost: float) -> None:
+        """
+        Increment run's total tokens and cost atomically.
+
+        Uses Supabase RPC function to ensure atomic updates even with
+        concurrent step completions.
+
+        Args:
+            run_id: The run to update
+            tokens: Number of tokens to add to total_tokens
+            cost: Cost in USD to add to total_cost
+        """
+        self.client.rpc('increment_run_costs', {
+            'p_run_id': run_id,
+            'p_tokens': tokens,
+            'p_cost': cost
+        }).execute()
+
     def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         """Get run details"""
         result = self.client.table('v2_runs').select('*').eq('run_id', run_id).execute()
