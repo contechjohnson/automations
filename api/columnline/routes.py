@@ -763,6 +763,26 @@ async def prepare_steps(request: StepPrepareRequest):
                 if output:
                     step_input[key] = extract_clean_content(output.get('output'))
 
+            # Try to get pre-calculated lead_score from 5A_ENRICH_LEAD or seed_data
+            # If not available, composer will calculate (fallback)
+            enrich_lead = step_input.get("enrich_lead_output", {})
+            if isinstance(enrich_lead, dict):
+                if enrich_lead.get("lead_score"):
+                    step_input["lead_score"] = enrich_lead["lead_score"]
+                if enrich_lead.get("timing_urgency"):
+                    step_input["timing_urgency"] = enrich_lead["timing_urgency"]
+                if enrich_lead.get("score_explanation"):
+                    step_input["score_explanation"] = enrich_lead["score_explanation"]
+
+            # Fallback to seed_data if available
+            run = repo.get_run(request.run_id)
+            if run:
+                seed = run.get("seed_data", {}) or {}
+                if not step_input.get("lead_score") and seed.get("lead_score"):
+                    step_input["lead_score"] = seed["lead_score"]
+                if not step_input.get("timing_urgency") and seed.get("timing_urgency"):
+                    step_input["timing_urgency"] = seed["timing_urgency"]
+
         # Merge Claims needs ALL claims including insight claims
         if step_name == "MERGE_CLAIMS":
             # Find all completed claims extraction steps
@@ -813,7 +833,8 @@ async def prepare_steps(request: StepPrepareRequest):
             "6_ENRICH_CONTACTS": "gpt-4.1",
             "6_ENRICH_CONTACT_INDIVIDUAL": "gpt-4.1",
             "10A_COPY": "gpt-4.1",
-            "10B_COPY_CLIENT_OVERRIDE": "gpt-4.1"
+            "10B_COPY_CLIENT_OVERRIDE": "gpt-4.1",
+            "11_DOSSIER_COMPOSER": "gpt-4.1"  # Make.com can override this
         }
         model_used = model_map.get(step_name, "gpt-4.1")
 
@@ -1244,6 +1265,43 @@ async def transition_step(request: StepTransitionRequest):
         if request.completed_step_name == "10A_COPY":
             step_input["base_copy"] = clean_output
 
+    if request.next_step_name == "11_DOSSIER_COMPOSER":
+        # Dossier composer needs all research narratives and enrichment outputs
+        # Fetch research narratives
+        signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+        if signal:
+            step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
+
+        entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+        if entity:
+            step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+        contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+        if contacts:
+            step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+        # Enrichment outputs + Insight
+        for step, key in [
+            ("5A_ENRICH_LEAD", "enrich_lead_output"),
+            ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+            ("5C_CLIENT_SPECIFIC", "client_specific_output"),
+            ("07B_INSIGHT", "insight_output"),
+            ("6_ENRICH_CONTACTS", "enriched_contacts")
+        ]:
+            output = repo.get_completed_step(request.run_id, step)
+            if output:
+                step_input[key] = extract_clean_content(output.get('output'))
+
+        # Pre-calculated scores from enrich_lead
+        enrich_lead = step_input.get("enrich_lead_output", {})
+        if isinstance(enrich_lead, dict):
+            if enrich_lead.get("lead_score"):
+                step_input["lead_score"] = enrich_lead["lead_score"]
+            if enrich_lead.get("timing_urgency"):
+                step_input["timing_urgency"] = enrich_lead["timing_urgency"]
+            if enrich_lead.get("score_explanation"):
+                step_input["score_explanation"] = enrich_lead["score_explanation"]
+
     # Get model
     model_map = {
         "1_SEARCH_BUILDER": "o4-mini",
@@ -1268,7 +1326,8 @@ async def transition_step(request: StepTransitionRequest):
         "6_ENRICH_CONTACTS": "gpt-4.1",
         "6_ENRICH_CONTACT_INDIVIDUAL": "gpt-4.1",
         "10A_COPY": "gpt-4.1",
-        "10B_COPY_CLIENT_OVERRIDE": "gpt-4.1"
+        "10B_COPY_CLIENT_OVERRIDE": "gpt-4.1",
+        "11_DOSSIER_COMPOSER": "gpt-4.1"
     }
     model_used = model_map.get(request.next_step_name, "gpt-4.1")
 
