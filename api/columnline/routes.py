@@ -2270,11 +2270,12 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             if cs_output.get('customResearch') and not find_lead.get('custom_research'):
                 find_lead['custom_research'] = cs_output['customResearch']
 
-            # warmPathsIn goes to network_intelligence
+            # warmPathsIn goes to network_intelligence (MERGE with existing)
             if cs_output.get('warmPathsIn'):
                 if not enrich_lead.get('network_intelligence'):
                     enrich_lead['network_intelligence'] = {}
-                enrich_lead['network_intelligence']['warm_paths_in'] = cs_output['warmPathsIn']
+                existing_warm_paths = enrich_lead['network_intelligence'].get('warm_paths_in', [])
+                enrich_lead['network_intelligence']['warm_paths_in'] = existing_warm_paths + cs_output['warmPathsIn']
 
             # Merge sources
             if cs_output.get('sources'):

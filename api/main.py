@@ -26,11 +26,11 @@ app.add_middleware(
 # from columnline_app.v2.api.router import router as v2_router
 # app.include_router(v2_router)
 
-# Include Make.com API endpoints
-from api.v2.prompts import router as prompts_router
-from api.v2.clients import router as clients_router
-from api.v2.logs import router as logs_router
-from api.v2.transform import router as transform_router
+# Include Make.com v2 API endpoints (consolidated into api/columnline/)
+from api.columnline.v2_prompts import router as prompts_router
+from api.columnline.v2_clients import router as clients_router
+from api.columnline.v2_logs import router as logs_router
+from api.columnline.v2_transform import router as transform_router
 
 app.include_router(prompts_router)
 app.include_router(clients_router)
