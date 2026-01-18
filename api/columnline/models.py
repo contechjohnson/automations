@@ -259,6 +259,7 @@ class StepTransitionRequest(BaseModel):
 
     # Previous step (to complete)
     completed_step_name: str
+    completed_step_id: Optional[str] = Field(default=None, description="Step ID to complete (required for parallel steps)")
     completed_step_output: Any = Field(..., description="Full OpenAI API response (we'll parse it)")
 
     # Next step (to prepare)

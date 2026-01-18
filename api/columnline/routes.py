@@ -1215,12 +1215,17 @@ async def transition_step(request: StepTransitionRequest):
     # Parse the OpenAI output
     parsed = parse_openai_response(request.completed_step_output)
 
-    # Find the step to complete - try "running" first, then any status
-    result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).eq('status', 'running').execute()
+    # Find the step to complete
+    if request.completed_step_id:
+        # Use step_id if provided (required for parallel steps)
+        result = repo.client.table('v2_pipeline_logs').select('*').eq('step_id', request.completed_step_id).execute()
+    else:
+        # Fallback to step_name - try "running" first, then any status
+        result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).eq('status', 'running').execute()
 
-    if not result.data:
-        # Not in "running" status - try to find it with any status
-        result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).execute()
+        if not result.data:
+            # Not in "running" status - try to find it with any status
+            result = repo.client.table('v2_pipeline_logs').select('*').eq('run_id', request.run_id).eq('step_name', request.completed_step_name).execute()
 
     # If we found the step, update it to completed with cost tracking
     if result.data:
