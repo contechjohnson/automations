@@ -668,29 +668,30 @@ async def prepare_steps(request: StepPrepareRequest):
             if entity_output:
                 step_input["entity_research_output"] = extract_clean_content(entity_output.get('output'))
 
-        # Insight needs ALL individual claims (not merged yet)
+        # Insight needs ALL research narratives (not claims)
         if step_name == "07B_INSIGHT":
-            # Find all completed claims extraction steps
-            all_claims_steps = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', 'CLAIMS_EXTRACTION').eq('status', 'completed').execute()
+            # Fetch all research narratives
+            signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal:
+                step_input["signal_discovery_narrative"] = extract_clean_content(signal.get('output'))
 
-            for claims_step in all_claims_steps.data:
-                # Figure out which research step this came from
-                step_input_data = claims_step.get('input', {})
-                claims_output = extract_clean_content(claims_step.get('output'))
+            entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity:
+                step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
 
-                # Add with descriptive key based on which step produced these claims
-                if '2_signal_discovery_output' in step_input_data:
-                    step_input["signal_discovery_claims"] = claims_output
-                elif '3_entity_research_output' in step_input_data:
-                    step_input["entity_research_claims"] = claims_output
-                elif '4_contact_discovery_output' in step_input_data:
-                    step_input["contact_discovery_claims"] = claims_output
-                elif '5a_enrich_lead_output' in step_input_data:
-                    step_input["enrich_lead_claims"] = claims_output
-                elif '5b_enrich_opportunity_output' in step_input_data:
-                    step_input["enrich_opportunity_claims"] = claims_output
-                elif '5c_client_specific_output' in step_input_data:
-                    step_input["client_specific_claims"] = claims_output
+            contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+            if contacts:
+                step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+            # Enrichment outputs
+            for step, key in [
+                ("5A_ENRICH_LEAD", "enrich_lead_output"),
+                ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+                ("5C_CLIENT_SPECIFIC", "client_specific_output"),
+            ]:
+                output = repo.get_completed_step(request.run_id, step)
+                if output:
+                    step_input[key] = extract_clean_content(output.get('output'))
 
         # Dossier Plan needs context pack + ALL individual claims
         if step_name == "9_DOSSIER_PLAN":
