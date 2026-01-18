@@ -2055,19 +2055,20 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
 
     # Validate we have minimum required outputs (either composers OR writers)
     has_composer = '11_DOSSIER_COMPOSER' in step_outputs
-    required_writers = ['10_WRITER_INTRO', '10_WRITER_SIGNALS']  # At minimum need these
-    missing_writers = [w for w in required_writers if w not in step_outputs]
 
-    if not has_composer and missing_writers:
-        # Check if we have any writer outputs at all
-        writer_steps = [s for s in step_outputs.keys() if s.startswith('10_WRITER')]
-        if not writer_steps:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No writer or composer outputs found for run {run_id}. Run 11_DOSSIER_COMPOSER or writers first."
-            )
-        # Log warning but continue - may have partial data
-        print(f"Warning: Missing some writer outputs for {run_id}: {missing_writers}")
+    # Check for writer/copy steps (new naming: 10A_COPY, 10B_COPY; old naming: 10_WRITER_*)
+    copy_steps = [s for s in step_outputs.keys() if s.startswith('10A_COPY') or s.startswith('10B_COPY')]
+    writer_steps = [s for s in step_outputs.keys() if s.startswith('10_WRITER')]
+    has_writers_or_copy = len(copy_steps) > 0 or len(writer_steps) > 0
+
+    print(f"  Publish validation: has_composer={has_composer}, copy_steps={len(copy_steps)}, writer_steps={len(writer_steps)}")
+    print(f"  Step outputs found: {list(step_outputs.keys())}")
+
+    if not has_composer and not has_writers_or_copy:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No writer or composer outputs found for run {run_id}. Run 11_DOSSIER_COMPOSER or writers first. Found steps: {list(step_outputs.keys())}"
+        )
 
     if has_composer:
         print(f"Using 11_DOSSIER_COMPOSER for dossier assembly (dynamic sections)")
