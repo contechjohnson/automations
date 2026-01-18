@@ -706,14 +706,42 @@ async def prepare_steps(request: StepPrepareRequest):
             all_claims = fetch_all_individual_claims(repo, request.run_id)
             step_input.update(all_claims)
 
-        # Media enrichment needs context pack + ALL individual claims
+        # Media enrichment needs all research narratives (V2 pipeline)
         if step_name == "8_MEDIA":
-            # Fetch context pack
+            # Fetch all research narratives up to this point
+            signal = repo.get_completed_step(request.run_id, "2_SIGNAL_DISCOVERY")
+            if signal:
+                signal_data = extract_clean_content(signal.get('output'))
+                step_input["signal_discovery_narrative"] = signal_data
+                # Extract company name and domain from signal discovery
+                if isinstance(signal_data, dict) and 'lead' in signal_data:
+                    step_input["target_company_name"] = signal_data['lead'].get('company_name', '')
+                    step_input["target_company_domain"] = signal_data['lead'].get('company_domain', '')
+
+            entity = repo.get_completed_step(request.run_id, "3_ENTITY_RESEARCH")
+            if entity:
+                step_input["entity_research_narrative"] = extract_clean_content(entity.get('output'))
+
+            contacts = repo.get_completed_step(request.run_id, "4_CONTACT_DISCOVERY")
+            if contacts:
+                step_input["contact_discovery_narrative"] = extract_clean_content(contacts.get('output'))
+
+            # Enrichment outputs
+            for step, key in [
+                ("5A_ENRICH_LEAD", "enrich_lead_output"),
+                ("5B_ENRICH_OPPORTUNITY", "enrich_opportunity_output"),
+                ("5C_CLIENT_SPECIFIC", "client_specific_output"),
+                ("6_ENRICH_CONTACTS", "enriched_contacts"),
+                ("07B_INSIGHT", "insight_output")
+            ]:
+                output = repo.get_completed_step(request.run_id, step)
+                if output:
+                    step_input[key] = extract_clean_content(output.get('output'))
+
+            # Backwards compatibility: still try old claims method
             context_pack_output = repo.get_completed_step(request.run_id, "CONTEXT_PACK")
             if context_pack_output:
                 step_input["context_pack"] = extract_clean_content(context_pack_output.get('output'))
-
-            # Pass ALL individual claims (not merged)
             all_claims = fetch_all_individual_claims(repo, request.run_id)
             step_input.update(all_claims)
 
