@@ -1048,8 +1048,15 @@ async def complete_steps(request: StepCompleteRequest):
                 print(f"[COMPLETE] Found completed step: {step['step_id']}")
 
         if not step:
-            print(f"[COMPLETE] ERROR: Step not found: {output_item.step_id or output_item.step_name}")
-            raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_id or output_item.step_name}")
+            error_msg = f"Step not found: {output_item.step_id or output_item.step_name}"
+            print(f"[COMPLETE] ERROR: {error_msg}")
+            # Mark run as failed so we capture the error in the database
+            repo.update_run(request.run_id, {
+                "status": "failed",
+                "error_message": error_msg,
+                "completed_at": datetime.now().isoformat()
+            })
+            raise HTTPException(status_code=404, detail=error_msg)
 
         # AUTO-PARSE: Extract tokens, runtime, model, and calculate cost
         parsed = parse_openai_response(output_item.output)
