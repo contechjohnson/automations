@@ -987,11 +987,16 @@ async def complete_steps(request: StepCompleteRequest):
         # Find the pipeline step
         step = None
 
+        print(f"[COMPLETE] Processing step: name={output_item.step_name}, step_id={output_item.step_id}")
+
         # If step_id provided, find by ID directly (for parallel steps with same name)
         if output_item.step_id:
             result = repo.client.table('v2_pipeline_steps').select('*').eq('step_id', output_item.step_id).eq('run_id', request.run_id).execute()
             if result.data:
                 step = result.data[0]
+                print(f"[COMPLETE] Found by step_id: {step['step_id']}")
+            else:
+                print(f"[COMPLETE] NOT FOUND by step_id: {output_item.step_id}")
         else:
             # Otherwise use step_name (existing logic)
             step = repo.get_completed_step(request.run_id, output_item.step_name)
@@ -1000,9 +1005,16 @@ async def complete_steps(request: StepCompleteRequest):
             if not step:
                 result = repo.client.table('v2_pipeline_steps').select('*').eq('run_id', request.run_id).eq('step_name', output_item.step_name).eq('status', 'running').execute()
                 if result.data:
+                    # WARN if multiple running steps found
+                    if len(result.data) > 1:
+                        print(f"[COMPLETE] WARNING: Found {len(result.data)} running steps for {output_item.step_name}! Picking first one.")
                     step = result.data[0]
+                    print(f"[COMPLETE] Found running step: {step['step_id']}")
+            else:
+                print(f"[COMPLETE] Found completed step: {step['step_id']}")
 
         if not step:
+            print(f"[COMPLETE] ERROR: Step not found: {output_item.step_id or output_item.step_name}")
             raise HTTPException(status_code=404, detail=f"Step not found: {output_item.step_id or output_item.step_name}")
 
         # AUTO-PARSE: If tokens/runtime not provided, extract from output
