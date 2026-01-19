@@ -2693,6 +2693,8 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'run_id', run_id
     ).eq('step_name', '6_ENRICH_CONTACT_INDIVIDUAL').eq('status', 'completed').execute()
 
+    # Also build index-based lookup for reliable matching (names can vary)
+    individual_enrichments_by_index = {}
     for step in individual_steps.data:
         enrichment = extract_clean_content(step.get('output', {}))
         if isinstance(enrichment, dict):
@@ -2700,9 +2702,14 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             first = enrichment.get('FIRST_NAME') or enrichment.get('first_name') or ''
             last = enrichment.get('LAST_NAME') or enrichment.get('last_name') or ''
             contact_name = enrichment.get('name') or f"{first} {last}".strip()
+            contact_index = enrichment.get('contact_index')
             if contact_name:
                 individual_enrichments[contact_name.lower()] = enrichment
                 print(f"  Found enrichment for: {contact_name}")
+            # Also key by index for reliable matching
+            if contact_index is not None:
+                individual_enrichments_by_index[contact_index] = enrichment
+                print(f"  Indexed enrichment at position: {contact_index}")
 
     # Get copy data from 10A_COPY and 10B_COPY_CLIENT_OVERRIDE steps
     # Query directly since multiple steps share the same step_name
@@ -2891,8 +2898,9 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         if not contact_name:
             contact_name = 'Unknown Contact'
 
-        # Look up individual enrichment data by name
-        enrichment = individual_enrichments.get(contact_name.lower(), {})
+        # Look up individual enrichment data - prefer index match, fall back to name
+        # Index matching is more reliable since names can vary (e.g., "Erica Tredinnick" vs "Erica C. Tredinnick")
+        enrichment = individual_enrichments_by_index.get(idx) or individual_enrichments.get(contact_name.lower(), {})
 
         # Merge base contact data with individual enrichment
         # Support both uppercase (old prompts) and lowercase (new prompts) field names

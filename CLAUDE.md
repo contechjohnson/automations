@@ -36,6 +36,7 @@ Skills trigger automatically based on semantic matching. Just describe what you 
 | `building-automations` | "build automation", "implement directive", "create worker" |
 | `using-rq-workers` | "queue job", "background", "RQ", "long running" |
 | `managing-mental-models` | "mental model", "priorities", "to-do", "columnline", "prologis", "life" |
+| `running-make-pipeline` | "run pipeline", "make dossier", "generate leads for X", "start batch", client names |
 
 
 ---
