@@ -116,9 +116,11 @@ def extract_clean_content(openai_output):
 
     Handles different response formats:
     - Claims Extraction: Returns the claims array
-    - Deep Research: Returns the narrative text
+    - Deep Research: Returns the narrative text or parsed JSON
     - Context Pack: Returns the context pack content
     """
+    import json
+
     # Handle None input
     if openai_output is None:
         return {}
@@ -139,7 +141,7 @@ def extract_clean_content(openai_output):
             return openai_output['result']['claims']  # Just the claims array
         return openai_output['result']  # Or the whole result object if no claims
 
-    # Pattern 2: Deep Research format - has "output" array with message content
+    # Pattern 2: Deep Research / Responses API format - has "output" array with message content
     if 'output' in openai_output and isinstance(openai_output['output'], list):
         # Find the message content (skip reasoning/web_search_call)
         for output_item in openai_output['output']:
@@ -148,7 +150,14 @@ def extract_clean_content(openai_output):
                 if content and isinstance(content, list):
                     for content_item in content:
                         if content_item.get('type') == 'output_text':
-                            return content_item.get('text', '')  # Just the text
+                            text = content_item.get('text', '')
+                            # Try to parse as JSON if it looks like JSON
+                            if isinstance(text, str) and text.strip().startswith('{'):
+                                try:
+                                    return json.loads(text)
+                                except json.JSONDecodeError:
+                                    pass
+                            return text
 
     # Pattern 3: Simple text response (fallback)
     if 'text' in openai_output:
