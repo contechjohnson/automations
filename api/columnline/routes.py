@@ -3197,6 +3197,9 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             'sections': sections
         }
 
+    # 15. Update dossier with complete rendered object (includes emailScripts, contacts, media)
+    repo.client.table('dossiers').update({'rendered': rendered}).eq('id', production_dossier_id).execute()
+
     return PublishResponse(
         success=True,
         run_id=run_id,
