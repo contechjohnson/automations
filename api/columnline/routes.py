@@ -2810,6 +2810,17 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     ]
     print(f"  [DEBUG] Sources: {len(sources_for_db)} items")
 
+    # =========================================================================
+    # NEW: Build rendered column for simple V2 path
+    # When rendered exists, transforms.ts reads directly from it (no 4-column mapping)
+    # =========================================================================
+    rendered_data = None
+    if composer_step:
+        composer_for_rendered = extract_clean_content(composer_step.get('output', {}))
+        if isinstance(composer_for_rendered, dict):
+            rendered_data = composer_for_rendered
+            print(f"  [DEBUG] Built rendered column from composer output")
+
     dossier_data = {
         'id': production_dossier_id,
         'client_id': production_client_id,
@@ -2823,6 +2834,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'media': media_data,
         'sources': sources_for_db,  # Top-level sources column for frontend (title/url format)
         'sections': sections,  # Dynamic sections from 11_DOSSIER_COMPOSER (null for legacy dossiers)
+        'rendered': rendered_data,  # NEW: V1-ready JSON for direct UI rendering
         'lead_score': find_lead.get('lead_score', 0),
         'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
         'primary_signal': (find_lead.get('primary_buying_signal') or {}).get('signal', ''),
