@@ -2776,6 +2776,16 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         (find_lead.get('company_snapshot') or {}).get('domain')
     )
 
+    # 10b. Construct logo URL from domain if media step didn't provide one
+    if company_domain and not media_data.get('logo_url'):
+        logo_url = f"https://www.google.com/s2/favicons?domain={company_domain}&sz=128"
+        media_data['logo_url'] = logo_url
+        media_data['logoUrl'] = logo_url  # V1 format
+        media_data['logo_fallback_chain'] = [
+            {'source': 'google_favicon', 'url': logo_url}
+        ]
+        print(f"  [DEBUG] Constructed logo URL from domain: {logo_url}")
+
     # 11. CHECK FOR EXISTING DOSSIER (unique constraint on client_id + company_domain)
     existing_dossier = None
     if company_domain:
@@ -2847,6 +2857,16 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         if isinstance(composer_for_rendered, dict):
             rendered_data = composer_for_rendered
             print(f"  [DEBUG] Built rendered column from composer output")
+
+    # Inject media fields into rendered data at top level for V1 frontend path
+    # Frontend expects rendered.projectImageUrl and rendered.logoUrl at TOP level
+    if rendered_data:
+        rendered_data['logoUrl'] = media_data.get('logo_url') or media_data.get('logoUrl') or ''
+        rendered_data['projectImageUrl'] = media_data.get('projectImageUrl', '')
+        rendered_data['projectImageCaption'] = media_data.get('projectImageCaption', '')
+        rendered_data['projectImageSource'] = media_data.get('projectImageSource', '')
+        rendered_data['media'] = media_data  # Also include full media object
+        print(f"  [DEBUG] Injected media into rendered: logoUrl={rendered_data['logoUrl']}, projectImageUrl={rendered_data['projectImageUrl']}")
 
     dossier_data = {
         'id': production_dossier_id,
@@ -3249,6 +3269,14 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             'media': media_data,
             'sections': sections
         }
+
+    # 14b. Inject top-level media fields into rendered for V1 frontend compatibility
+    # Frontend expects rendered.projectImageUrl and rendered.logoUrl at TOP level
+    rendered['logoUrl'] = media_data.get('logo_url') or media_data.get('logoUrl') or ''
+    rendered['projectImageUrl'] = media_data.get('projectImageUrl', '')
+    rendered['projectImageCaption'] = media_data.get('projectImageCaption', '')
+    rendered['projectImageSource'] = media_data.get('projectImageSource', '')
+    print(f"  [DEBUG] Final rendered media: logoUrl={rendered['logoUrl']}, projectImageUrl={rendered['projectImageUrl']}")
 
     # 15. Update dossier with complete rendered object (includes emailScripts, contacts, media)
     repo.client.table('dossiers').update({'rendered': rendered}).eq('id', production_dossier_id).execute()
