@@ -2472,7 +2472,9 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                 find_lead['company_snapshot'] = find_lead.get('company_snapshot', {})
                 find_lead['company_snapshot']['domain'] = composer_output['domain']
             if composer_output.get('whatTheyDo'):
-                find_lead['what_they_do'] = composer_output['whatTheyDo']
+                # Frontend reads find_leads.company_snapshot.description for whatTheyDo
+                find_lead['company_snapshot'] = find_lead.get('company_snapshot', {})
+                find_lead['company_snapshot']['description'] = composer_output['whatTheyDo']
             if composer_output.get('theAngle'):
                 find_lead['the_angle'] = composer_output['theAngle']
             if composer_output.get('leadScore'):
@@ -2484,9 +2486,36 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             if composer_output.get('timingContext'):
                 find_lead['one_liner'] = composer_output['timingContext']
             if composer_output.get('opportunityIntelligence'):
-                find_lead['opportunity_intelligence'] = composer_output['opportunityIntelligence']
+                opp = composer_output['opportunityIntelligence']
+                # Frontend expects snake_case keys
+                find_lead['opportunity_intelligence'] = {
+                    'headline': opp.get('headline', ''),
+                    'opportunity_type': opp.get('opportunityType', ''),
+                    'timeline': opp.get('timeline'),
+                    'budget_range': opp.get('budgetRange'),
+                    'key_details': opp.get('keyDetails', []),
+                    'why_it_matters': opp.get('whyItMatters', '')
+                }
             if composer_output.get('customResearch'):
-                find_lead['custom_research'] = composer_output['customResearch']
+                cr = composer_output['customResearch']
+                # Frontend expects snake_case: criteria_name, contact_name
+                find_lead['custom_research'] = {
+                    'title': cr.get('title', 'Custom Research'),
+                    'items': [
+                        {
+                            'criteria_name': item.get('criteriaName', ''),
+                            'matches': [
+                                {
+                                    'contact_name': m.get('contactName', ''),
+                                    'evidence': m.get('evidence', ''),
+                                    'source': m.get('source')
+                                }
+                                for m in item.get('matches', [])
+                            ]
+                        }
+                        for item in cr.get('items', [])
+                    ]
+                }
 
             # Map V1 composer output to enrich_lead fields
             # Frontend expects: enrich_lead.company_deep_dive.description (NOT company_intel.summary)
@@ -2499,7 +2528,17 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                     'general_emails': ci.get('generalEmails', []),
                 }
             if composer_output.get('whyNow'):
-                # Frontend expects additional_signals array with signal/description/source_url
+                why_now = composer_output['whyNow']
+                # First signal goes to primary_buying_signal (transforms.ts reads this for whyNow[0])
+                if len(why_now) > 0:
+                    first = why_now[0]
+                    find_lead['primary_buying_signal'] = {
+                        'signal': first.get('signal', ''),
+                        'description': first.get('happening', ''),
+                        'source_url': (first.get('proof') or {}).get('url', ''),
+                        'source_name': (first.get('proof') or {}).get('text', '')
+                    }
+                # All signals also go to additional_signals for the full list
                 enrich_lead['additional_signals'] = [
                     {
                         'signal': s.get('signal', ''),
@@ -2507,15 +2546,23 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                         'source_url': (s.get('proof') or {}).get('url', ''),
                         'source_name': (s.get('proof') or {}).get('text', '')
                     }
-                    for s in composer_output['whyNow']
+                    for s in why_now
                 ]
             if composer_output.get('corporateStructure'):
                 enrich_lead['corporate_structure'] = composer_output['corporateStructure']
             if composer_output.get('networkIntelligence'):
                 ni = composer_output['networkIntelligence']
-                # Frontend expects warm_paths (snake_case), not warmPathsIn
+                # Frontend expects warm_paths with name/title/approach/linkedin_url
                 enrich_lead['network_intelligence'] = {
-                    'warm_paths': ni.get('warmPathsIn', []),
+                    'warm_paths': [
+                        {
+                            'name': wp.get('title', ''),  # warmPathsIn.title → warm_paths.name
+                            'title': wp.get('description', ''),  # warmPathsIn.description → warm_paths.title
+                            'approach': wp.get('approach', ''),
+                            'linkedin_url': wp.get('connectionToTargets', '')
+                        }
+                        for wp in ni.get('warmPathsIn', [])
+                    ],
                     'associations': ni.get('associations', []),
                     'partnerships': ni.get('partnerships', []),
                     'conferences': ni.get('conferences', []),
@@ -2540,18 +2587,36 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                 }
             if composer_output.get('competitivePositioning'):
                 cp = composer_output['competitivePositioning']
+                # Frontend expects insight/advantage for whatTheyDontKnow, topic/reason for landmines
                 insight_data['competitive_positioning'] = {
-                    'insights_they_dont_know': cp.get('whatTheyDontKnow', []),
-                    'landmines_to_avoid': cp.get('landminesToAvoid', []),
+                    'insights_they_dont_know': [
+                        {'insight': i.get('insight', ''), 'advantage': i.get('advantage', '')}
+                        for i in cp.get('whatTheyDontKnow', [])
+                    ],
+                    'landmines_to_avoid': [
+                        {'topic': l.get('topic', ''), 'reason': l.get('reason', '')}
+                        for l in cp.get('landminesToAvoid', [])
+                    ],
                 }
             if composer_output.get('decisionStrategy'):
                 dcs = composer_output['decisionStrategy']
+                # Frontend expects snake_case keys in nested objects
                 insight_data['decision_making_process'] = {
                     'company_type': dcs.get('companyType', ''),
                     'organizational_structure': dcs.get('organizationalStructure', ''),
-                    'key_roles': dcs.get('keyRoles', []),
+                    'key_roles': [
+                        {
+                            'role': r.get('role', ''),
+                            'influence': r.get('influence', ''),
+                            'what_they_care_about': r.get('whatTheyCareAbout', '')
+                        }
+                        for r in dcs.get('keyRoles', [])
+                    ],
                     'typical_process': dcs.get('typicalProcess', ''),
-                    'entry_points': dcs.get('entryPoints', []),
+                    'entry_points': [
+                        {'approach': e.get('approach', ''), 'rationale': e.get('rationale', '')}
+                        for e in dcs.get('entryPoints', [])
+                    ],
                 }
             if composer_output.get('commonObjections'):
                 insight_data['common_objections'] = composer_output['commonObjections']
