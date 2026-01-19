@@ -2859,39 +2859,27 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'status': 'published'
     })
 
-    # Build rendered object in V1 UI format (matches DossierView.tsx expectations)
-    # This mirrors the transformDossier function in web/lib/transforms.ts
-    primary_signal = find_lead.get('primary_buying_signal') or {}
-    company_snapshot = find_lead.get('company_snapshot') or {}
-    company_deep_dive = enrich_lead.get('company_deep_dive') or {}
-    network_intel = enrich_lead.get('network_intelligence') or {}
-    the_math = insight_data.get('the_math') or {}
-    competitive = insight_data.get('competitive_positioning') or {}
-    decision_making = insight_data.get('decision_making_process') or {}
-    deal_strat = insight_data.get('deal_strategy') or {}
+    # ==========================================================================
+    # BUILD RENDERED OBJECT
+    # Three inputs: (1) Composer, (2) Client-Specific, (3) Contacts/Copy
+    # ==========================================================================
 
-    # Build whyNow signals array
-    why_now_signals = []
-    if primary_signal:
-        why_now_signals.append({
-            'signal': primary_signal.get('signal', ''),
-            'happening': primary_signal.get('description', ''),
-            'proof': {
-                'text': primary_signal.get('source_name', ''),
-                'url': primary_signal.get('source_url', '')
-            }
-        })
-    for sig in enrich_lead.get('additional_signals', []):
-        why_now_signals.append({
-            'signal': sig.get('signal', ''),
-            'happening': sig.get('description', ''),
-            'proof': {
-                'text': sig.get('source_name', ''),
-                'url': sig.get('source_url', '')
-            }
-        })
+    # 1. Get composer output directly (it's already in V1 format)
+    composer_output = None
+    if composer_step:
+        composer_output = extract_clean_content(composer_step.get('output', {}))
+        if not isinstance(composer_output, dict):
+            composer_output = None
 
-    # Build emailScripts from copy outreach
+    # 2. Get client-specific output directly
+    client_specific_output = None
+    client_specific_step = step_outputs.get('5C_CLIENT_SPECIFIC', {})
+    if client_specific_step:
+        client_specific_output = extract_clean_content(client_specific_step.get('output', {}))
+        if not isinstance(client_specific_output, dict):
+            client_specific_output = None
+
+    # 3. Build emailScripts from copy outreach
     email_scripts = []
     for idx, o in enumerate(copy_data.get('outreach', [])):
         email_scripts.append({
@@ -2902,7 +2890,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             'linkedinMessage': o.get('linkedin_message', '')
         })
 
-    # Build contacts in V1 format
+    # 4. Build contacts in V1 format
     v1_contacts = []
     for idx, c in enumerate(contacts_list):
         if not isinstance(c, dict):
@@ -2921,114 +2909,109 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             'highlight': 'PRIMARY' if idx == 0 else ''
         })
 
-    rendered = {
-        # Header fields
-        'companyName': company_name,
-        'domain': company_domain,
-        'whatTheyDo': find_lead.get('what_they_do') or company_snapshot.get('description', ''),
-        'theAngle': find_lead.get('the_angle', ''),
-        'leadScore': find_lead.get('lead_score', 0),
-        'explanation': find_lead.get('score_explanation', ''),
-        'urgency': find_lead.get('timing_urgency', 'Medium'),
-        'timingContext': find_lead.get('one_liner', ''),
+    # 5. Build rendered - USE COMPOSER DIRECTLY when available
+    if composer_output:
+        # Composer output IS the rendered format - just use it
+        rendered = {
+            # Header fields from composer
+            'companyName': composer_output.get('companyName', company_name),
+            'domain': composer_output.get('domain', company_domain),
+            'whatTheyDo': composer_output.get('whatTheyDo', ''),
+            'theAngle': composer_output.get('theAngle', ''),
+            'leadScore': composer_output.get('leadScore', 0),
+            'explanation': composer_output.get('explanation', ''),
+            'urgency': composer_output.get('urgency', 'Medium'),
+            'timingContext': composer_output.get('timingContext', ''),
 
-        # Signals
-        'whyNow': why_now_signals,
+            # Direct passthrough from composer
+            'whyNow': composer_output.get('whyNow', []),
+            'theMathStructured': composer_output.get('theMathStructured'),
+            'companyIntel': composer_output.get('companyIntel'),
+            'opportunityIntelligence': composer_output.get('opportunityIntelligence'),
+            'corporateStructure': composer_output.get('corporateStructure'),
+            'networkIntelligence': composer_output.get('networkIntelligence'),
+            'competitivePositioning': composer_output.get('competitivePositioning'),
+            'dealStrategy': composer_output.get('dealStrategy'),
+            'decisionStrategy': composer_output.get('decisionStrategy'),
+            'commonObjections': composer_output.get('commonObjections', []),
+            'quickReference': composer_output.get('quickReference'),
+            'sources': composer_output.get('sources', []),
 
-        # The Math (structured)
-        'theMathStructured': {
-            'theirReality': the_math.get('their_reality', ''),
-            'theOpportunity': the_math.get('the_opportunity', ''),
-            'translation': the_math.get('translation', ''),
-            'bottomLine': the_math.get('bottom_line', '')
-        } if the_math else None,
+            # Client-specific customResearch (from 5C step, or composer fallback)
+            'customResearch': (
+                client_specific_output.get('customResearch') if client_specific_output
+                else composer_output.get('customResearch')
+            ),
 
-        # Company Intel
-        'companyIntel': {
-            'summary': company_deep_dive.get('description') or company_deep_dive.get('company_overview') or company_snapshot.get('description', ''),
-            'numbers': [
-                f"{company_deep_dive.get('employees', '')} employees" if company_deep_dive.get('employees') else None,
-                company_deep_dive.get('revenue'),
-                f"Founded {company_deep_dive.get('founded_year')}" if company_deep_dive.get('founded_year') else None,
-            ],
-            'mainlinePhones': company_deep_dive.get('mainline_phones', []),
-            'generalEmails': company_deep_dive.get('general_emails', [])
-        },
+            # These come from contacts/copy processing, not composer
+            'contacts': v1_contacts,
+            'emailScripts': email_scripts,
+            'media': media_data,
+            'sections': sections
+        }
+    else:
+        # Fallback: No composer, build from old writer outputs (legacy path)
+        primary_signal = find_lead.get('primary_buying_signal') or {}
+        company_snapshot = find_lead.get('company_snapshot') or {}
+        company_deep_dive = enrich_lead.get('company_deep_dive') or {}
+        network_intel = enrich_lead.get('network_intelligence') or {}
+        the_math = insight_data.get('the_math') or {}
+        competitive = insight_data.get('competitive_positioning') or {}
+        decision_making = insight_data.get('decision_making_process') or {}
+        deal_strat = insight_data.get('deal_strategy') or {}
 
-        # Opportunity Intelligence (V2)
-        'opportunityIntelligence': find_lead.get('opportunity_intelligence'),
-
-        # Custom Research (V2)
-        'customResearch': find_lead.get('custom_research'),
-
-        # Corporate Structure
-        'corporateStructure': enrich_lead.get('corporate_structure'),
-
-        # Network Intelligence
-        'networkIntelligence': {
-            'warmPathsIn': [
-                {
-                    'title': wp.get('name') or wp.get('title', ''),
-                    'description': wp.get('title') or wp.get('role', ''),
-                    'approach': wp.get('approach', ''),
-                    'connectionToTargets': wp.get('linkedin_url') or wp.get('connection_to_targets', '')
+        why_now_signals = []
+        if primary_signal:
+            why_now_signals.append({
+                'signal': primary_signal.get('signal', ''),
+                'happening': primary_signal.get('description', ''),
+                'proof': {
+                    'text': primary_signal.get('source_name', ''),
+                    'url': primary_signal.get('source_url', '')
                 }
-                for wp in (network_intel.get('warm_paths') or network_intel.get('warm_intro_paths') or [])
-            ],
-            'associations': network_intel.get('associations', []),
-            'partnerships': network_intel.get('partnerships', []),
-            'conferences': network_intel.get('conferences', []),
-            'awards': network_intel.get('awards', [])
-        },
+            })
 
-        # Competitive Positioning
-        'competitivePositioning': {
-            'whatTheyDontKnow': competitive.get('insights_they_dont_know', []),
-            'landminesToAvoid': competitive.get('landmines_to_avoid', [])
-        },
-
-        # Deal Strategy
-        'dealStrategy': {
-            'howTheyBuy': deal_strat.get('how_they_buy', ''),
-            'uniqueValue': deal_strat.get('unique_value', [])
-        },
-
-        # Decision Strategy
-        'decisionStrategy': {
-            'companyType': decision_making.get('company_type', ''),
-            'organizationalStructure': decision_making.get('organizational_structure', ''),
-            'keyRoles': decision_making.get('key_roles', []),
-            'typicalProcess': decision_making.get('typical_process', ''),
-            'entryPoints': decision_making.get('entry_points', [])
-        },
-
-        # Common Objections
-        'commonObjections': copy_data.get('objections', []),
-
-        # Quick Reference
-        'quickReference': {
-            'conversationStarters': copy_data.get('conversation_starters', [])
-        },
-
-        # Contacts
-        'contacts': v1_contacts,
-
-        # Email Scripts
-        'emailScripts': email_scripts,
-
-        # Media
-        'media': media_data,
-
-        # Sources
-        'sources': (insight_data.get('sources') or []) if insight_data else [],
-
-        # Dynamic sections (if present)
-        'sections': sections
-    }
-
-    # Clean up None values from companyIntel.numbers
-    if rendered.get('companyIntel') and rendered['companyIntel'].get('numbers'):
-        rendered['companyIntel']['numbers'] = [n for n in rendered['companyIntel']['numbers'] if n]
+        rendered = {
+            'companyName': company_name,
+            'domain': company_domain,
+            'whatTheyDo': find_lead.get('what_they_do') or company_snapshot.get('description', ''),
+            'theAngle': find_lead.get('the_angle', ''),
+            'leadScore': find_lead.get('lead_score', 0),
+            'explanation': find_lead.get('score_explanation', ''),
+            'urgency': find_lead.get('timing_urgency', 'Medium'),
+            'timingContext': find_lead.get('one_liner', ''),
+            'whyNow': why_now_signals,
+            'theMathStructured': the_math if the_math else None,
+            'companyIntel': {
+                'summary': company_deep_dive.get('description', ''),
+                'numbers': [],
+                'mainlinePhones': [],
+                'generalEmails': []
+            },
+            'opportunityIntelligence': find_lead.get('opportunity_intelligence'),
+            'customResearch': (
+                client_specific_output.get('customResearch') if client_specific_output
+                else find_lead.get('custom_research')
+            ),
+            'corporateStructure': enrich_lead.get('corporate_structure'),
+            'networkIntelligence': {
+                'warmPathsIn': [],
+                'associations': network_intel.get('associations', []),
+                'partnerships': network_intel.get('partnerships', []),
+                'conferences': [],
+                'awards': []
+            },
+            'competitivePositioning': competitive,
+            'dealStrategy': deal_strat,
+            'decisionStrategy': decision_making,
+            'commonObjections': [],
+            'quickReference': {'conversationStarters': []},
+            'sources': insight_data.get('sources', []) if insight_data else [],
+            'contacts': v1_contacts,
+            'emailScripts': email_scripts,
+            'media': media_data,
+            'sections': sections
+        }
 
     return PublishResponse(
         success=True,
