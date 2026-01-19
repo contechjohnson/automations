@@ -2799,6 +2799,17 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
 
     print(f"  [DEBUG] V1-compat merge: company_deep_dive={bool(enrich_lead.get('company_deep_dive'))}, additional_signals={len(enrich_lead.get('additional_signals', []))}, contacts={len(contacts_list)}")
 
+    # Extract sources and convert to frontend format (text → title)
+    raw_sources = insight_data.get('sources', [])
+    sources_for_db = [
+        {
+            'title': s.get('text', s.get('title', '')),  # Composer uses 'text', frontend expects 'title'
+            'url': s.get('url', '')
+        }
+        for s in raw_sources if isinstance(s, dict)
+    ]
+    print(f"  [DEBUG] Sources: {len(sources_for_db)} items")
+
     dossier_data = {
         'id': production_dossier_id,
         'client_id': production_client_id,
@@ -2810,6 +2821,7 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
         'copy': copy_data,  # Initial copy without outreach - will update after contacts
         'insight': insight_data,
         'media': media_data,
+        'sources': sources_for_db,  # Top-level sources column for frontend (title/url format)
         'sections': sections,  # Dynamic sections from 11_DOSSIER_COMPOSER (null for legacy dossiers)
         'lead_score': find_lead.get('lead_score', 0),
         'timing_urgency': find_lead.get('timing_urgency', 'MEDIUM'),
