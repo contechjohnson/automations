@@ -119,9 +119,19 @@ def extract_clean_content(openai_output):
     - Deep Research: Returns the narrative text
     - Context Pack: Returns the context pack content
     """
+    # Handle None input
+    if openai_output is None:
+        return {}
+
     # If it's an array, take first element
     if isinstance(openai_output, list):
+        if not openai_output:
+            return {}
         openai_output = openai_output[0]
+
+    # If still None or not a dict, return empty
+    if openai_output is None or not isinstance(openai_output, dict):
+        return openai_output if openai_output else {}
 
     # Pattern 1: Claims Extraction format - has "result.claims"
     if 'result' in openai_output and isinstance(openai_output['result'], dict):
