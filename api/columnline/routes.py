@@ -2648,13 +2648,78 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             production_dossier_id = existing_dossier['id']
             print(f"Found existing dossier {production_dossier_id} for {company_domain}, will update")
 
+    # =========================================================================
+    # CRITICAL: Merge V2 data INTO find_lead for frontend compatibility
+    # Frontend reads from find_leads column, not enrich_lead/insight columns
+    # =========================================================================
+
+    # 1. Copy company_intel from enrich_lead into find_lead
+    if enrich_lead.get('company_intel'):
+        find_lead['company_intel'] = enrich_lead['company_intel']
+
+    # 2. Copy why_now from enrich_lead into find_lead.narrative
+    if enrich_lead.get('why_now'):
+        if 'narrative' not in find_lead:
+            find_lead['narrative'] = {}
+        # Frontend expects narrative.why_now as a string (first signal description)
+        why_now_list = enrich_lead['why_now']
+        if isinstance(why_now_list, list) and why_now_list:
+            find_lead['narrative']['why_now'] = why_now_list[0].get('happening', '')
+        # Also store full why_now array for V2 rendering
+        find_lead['why_now'] = why_now_list
+
+    # 3. Copy network_intelligence into find_lead.network
+    if enrich_lead.get('network_intelligence'):
+        if 'network' not in find_lead:
+            find_lead['network'] = {}
+        network = enrich_lead['network_intelligence']
+        # Map V2 field names to V1 field names
+        if network.get('warmPathsIn'):
+            find_lead['network']['warm_paths'] = network['warmPathsIn']
+        if network.get('partnerships'):
+            find_lead['network']['partnerships'] = network['partnerships']
+        if network.get('associations'):
+            find_lead['network']['associations'] = network['associations']
+        if network.get('awards'):
+            find_lead['network']['awards'] = network['awards']
+        if network.get('conferences'):
+            find_lead['network']['conferences'] = network['conferences']
+        # Also keep full object for V2
+        find_lead['network_intelligence'] = network
+
+    # 4. Copy corporate_structure
+    if enrich_lead.get('corporate_structure'):
+        find_lead['corporate_structure'] = enrich_lead['corporate_structure']
+
+    # 5. Copy the_math, deal_strategy, competitive_positioning from insight
+    if insight_data.get('the_math'):
+        find_lead['the_math'] = insight_data['the_math']
+    if insight_data.get('deal_strategy'):
+        find_lead['deal_strategy'] = insight_data['deal_strategy']
+    if insight_data.get('competitive_positioning'):
+        find_lead['competitive_positioning'] = insight_data['competitive_positioning']
+    if insight_data.get('decision_strategy'):
+        find_lead['decision_strategy'] = insight_data['decision_strategy']
+    if insight_data.get('common_objections'):
+        find_lead['common_objections'] = insight_data['common_objections']
+    if insight_data.get('quick_reference'):
+        find_lead['quick_reference'] = insight_data['quick_reference']
+    if insight_data.get('sources'):
+        find_lead['sources'] = insight_data['sources']
+
+    # 6. Copy contacts list into find_lead.contacts (for frontend)
+    if contacts_list:
+        find_lead['contacts'] = contacts_list
+
+    print(f"  [DEBUG] V1-compat merge: company_intel={bool(find_lead.get('company_intel'))}, why_now={bool(find_lead.get('why_now'))}, contacts={len(contacts_list)}")
+
     dossier_data = {
         'id': production_dossier_id,
         'client_id': production_client_id,
         'batch_id': batch['id'],
         'company_name': company_name,
         'company_domain': company_domain,
-        'find_leads': find_lead,  # Note: column is 'find_leads' with 's'
+        'find_leads': find_lead,  # Note: column is 'find_leads' with 's' - NOW CONTAINS V2 DATA
         'enrich_lead': enrich_lead,
         'copy': copy_data,  # Initial copy without outreach - will update after contacts
         'insight': insight_data,
