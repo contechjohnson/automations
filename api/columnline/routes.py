@@ -2320,11 +2320,21 @@ def assemble_copy(step_outputs: dict, contact_id_map: dict) -> dict:
 
 
 def assemble_media(step_outputs: dict) -> dict:
-    """Assemble media JSONB from 8_MEDIA output."""
+    """Assemble media JSONB from 8_MEDIA output.
+
+    Returns both:
+    - project_images: array format for storage
+    - projectImageUrl/Caption/Source: flat format for V1 UI
+    """
     media = {
         'logo_url': '',
+        'logoUrl': '',  # V1 format
         'logo_fallback_chain': [],
-        'project_images': []
+        'project_images': [],
+        # V1 flat format (first image)
+        'projectImageUrl': '',
+        'projectImageCaption': '',
+        'projectImageSource': ''
     }
 
     media_output = step_outputs.get('8_MEDIA', {})
@@ -2332,14 +2342,24 @@ def assemble_media(step_outputs: dict) -> dict:
         clean = extract_clean_content(media_output.get('output', {}))
         if isinstance(clean, dict):
             media['logo_url'] = clean.get('logo_url') or ''
+            media['logoUrl'] = media['logo_url']  # V1 format
             media['logo_fallback_chain'] = clean.get('logo_fallback_chain') or []
             # Try multiple field names for project images
-            media['project_images'] = (
+            project_images = (
                 clean.get('project_images') or
                 clean.get('recommended_project_images') or
                 clean.get('image_assets') or
                 []
             )
+            media['project_images'] = project_images
+
+            # V1 flat format: extract first image
+            if project_images and len(project_images) > 0:
+                first_img = project_images[0]
+                if isinstance(first_img, dict):
+                    media['projectImageUrl'] = first_img.get('url') or ''
+                    media['projectImageCaption'] = first_img.get('caption') or first_img.get('project_name') or ''
+                    media['projectImageSource'] = first_img.get('source_url') or ''
 
     return media
 
