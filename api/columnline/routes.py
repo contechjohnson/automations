@@ -2360,9 +2360,14 @@ async def publish_to_production(run_id: str, request: PublishRequest = None):
     except HTTPException:
         raise
     except Exception as e:
+        tb = traceback.format_exc()
         print(f"PUBLISH ERROR for {run_id}: {str(e)}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Publish failed: {str(e)}")
+        print(tb)
+        # Extract last line number from traceback for debugging
+        import re
+        line_match = re.findall(r'line (\d+)', tb)
+        line_info = f" (line {line_match[-1]})" if line_match else ""
+        raise HTTPException(status_code=500, detail=f"Publish failed{line_info}: {str(e)}")
 
 
 async def _publish_to_production_impl(run_id: str, request: PublishRequest = None):
