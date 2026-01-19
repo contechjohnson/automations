@@ -3154,6 +3154,20 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                     'url': primary_signal.get('source_url', '')
                 }
             })
+        # Also include additional_signals from enrich_lead
+        additional_signals = enrich_lead.get('additional_signals', [])
+        for sig in additional_signals:
+            # Skip if this signal is same as primary (avoid duplication)
+            if sig.get('signal_type') == primary_signal.get('signal'):
+                continue
+            why_now_signals.append({
+                'signal': sig.get('signal_type', ''),
+                'happening': sig.get('description', ''),
+                'proof': {
+                    'text': sig.get('source_name', ''),
+                    'url': sig.get('source_url', '')
+                }
+            })
 
         rendered = {
             'companyName': company_name,
