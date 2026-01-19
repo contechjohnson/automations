@@ -2489,24 +2489,70 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                 find_lead['custom_research'] = composer_output['customResearch']
 
             # Map V1 composer output to enrich_lead fields
+            # Frontend expects: enrich_lead.company_deep_dive.description (NOT company_intel.summary)
             if composer_output.get('companyIntel'):
-                enrich_lead['company_intel'] = composer_output['companyIntel']
+                ci = composer_output['companyIntel']
+                enrich_lead['company_deep_dive'] = {
+                    'description': ci.get('summary', ''),
+                    'employees': ci.get('numbers', []),  # Frontend reads this for numbers
+                    'mainline_phones': ci.get('mainlinePhones', []),
+                    'general_emails': ci.get('generalEmails', []),
+                }
             if composer_output.get('whyNow'):
-                enrich_lead['why_now'] = composer_output['whyNow']
+                # Frontend expects additional_signals array with signal/description/source_url
+                enrich_lead['additional_signals'] = [
+                    {
+                        'signal': s.get('signal', ''),
+                        'description': s.get('happening', ''),
+                        'source_url': (s.get('proof') or {}).get('url', ''),
+                        'source_name': (s.get('proof') or {}).get('text', '')
+                    }
+                    for s in composer_output['whyNow']
+                ]
             if composer_output.get('corporateStructure'):
                 enrich_lead['corporate_structure'] = composer_output['corporateStructure']
             if composer_output.get('networkIntelligence'):
-                enrich_lead['network_intelligence'] = composer_output['networkIntelligence']
+                ni = composer_output['networkIntelligence']
+                # Frontend expects warm_paths (snake_case), not warmPathsIn
+                enrich_lead['network_intelligence'] = {
+                    'warm_paths': ni.get('warmPathsIn', []),
+                    'associations': ni.get('associations', []),
+                    'partnerships': ni.get('partnerships', []),
+                    'conferences': ni.get('conferences', []),
+                    'awards': ni.get('awards', []),
+                }
 
             # Map V1 composer output to insight fields
+            # Frontend expects SNAKE_CASE keys (their_reality, not theirReality)
             if composer_output.get('theMathStructured'):
-                insight_data['the_math'] = composer_output['theMathStructured']
+                tm = composer_output['theMathStructured']
+                insight_data['the_math'] = {
+                    'their_reality': tm.get('theirReality', ''),
+                    'the_opportunity': tm.get('theOpportunity', ''),
+                    'translation': tm.get('translation', ''),
+                    'bottom_line': tm.get('bottomLine', ''),
+                }
             if composer_output.get('dealStrategy'):
-                insight_data['deal_strategy'] = composer_output['dealStrategy']
+                ds = composer_output['dealStrategy']
+                insight_data['deal_strategy'] = {
+                    'how_they_buy': ds.get('howTheyBuy', ''),
+                    'unique_value_props': ds.get('uniqueValue', []),
+                }
             if composer_output.get('competitivePositioning'):
-                insight_data['competitive_positioning'] = composer_output['competitivePositioning']
+                cp = composer_output['competitivePositioning']
+                insight_data['competitive_positioning'] = {
+                    'insights_they_dont_know': cp.get('whatTheyDontKnow', []),
+                    'landmines_to_avoid': cp.get('landminesToAvoid', []),
+                }
             if composer_output.get('decisionStrategy'):
-                insight_data['decision_strategy'] = composer_output['decisionStrategy']
+                dcs = composer_output['decisionStrategy']
+                insight_data['decision_making_process'] = {
+                    'company_type': dcs.get('companyType', ''),
+                    'organizational_structure': dcs.get('organizationalStructure', ''),
+                    'key_roles': dcs.get('keyRoles', []),
+                    'typical_process': dcs.get('typicalProcess', ''),
+                    'entry_points': dcs.get('entryPoints', []),
+                }
             if composer_output.get('commonObjections'):
                 insight_data['common_objections'] = composer_output['commonObjections']
             if composer_output.get('quickReference'):
@@ -2527,11 +2573,12 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
                 find_lead['custom_research'] = cs_output['customResearch']
 
             # warmPathsIn goes to network_intelligence (MERGE with existing)
+            # Frontend expects warm_paths (snake_case), not warmPathsIn
             if cs_output.get('warmPathsIn'):
                 if not enrich_lead.get('network_intelligence'):
                     enrich_lead['network_intelligence'] = {}
-                existing_warm_paths = enrich_lead['network_intelligence'].get('warm_paths_in', [])
-                enrich_lead['network_intelligence']['warm_paths_in'] = existing_warm_paths + cs_output['warmPathsIn']
+                existing_warm_paths = enrich_lead['network_intelligence'].get('warm_paths', [])
+                enrich_lead['network_intelligence']['warm_paths'] = existing_warm_paths + cs_output['warmPathsIn']
 
             # Merge sources
             if cs_output.get('sources'):
@@ -2653,65 +2700,39 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
     # Frontend reads from find_leads column, not enrich_lead/insight columns
     # =========================================================================
 
-    # 1. Copy company_intel from enrich_lead into find_lead
-    if enrich_lead.get('company_intel'):
-        find_lead['company_intel'] = enrich_lead['company_intel']
+    # 1. Copy company_deep_dive from enrich_lead into find_lead for fallback paths
+    if enrich_lead.get('company_deep_dive'):
+        find_lead['company_snapshot'] = find_lead.get('company_snapshot', {})
+        find_lead['company_snapshot']['description'] = enrich_lead['company_deep_dive'].get('description', '')
 
-    # 2. Copy why_now from enrich_lead into find_lead.narrative
-    if enrich_lead.get('why_now'):
-        if 'narrative' not in find_lead:
-            find_lead['narrative'] = {}
-        # Frontend expects narrative.why_now as a string (first signal description)
-        why_now_list = enrich_lead['why_now']
-        if isinstance(why_now_list, list) and why_now_list:
-            find_lead['narrative']['why_now'] = why_now_list[0].get('happening', '')
-        # Also store full why_now array for V2 rendering
-        find_lead['why_now'] = why_now_list
+    # 2. Build primary_buying_signal from additional_signals for why_now section
+    if enrich_lead.get('additional_signals') and len(enrich_lead['additional_signals']) > 0:
+        first_signal = enrich_lead['additional_signals'][0]
+        find_lead['primary_buying_signal'] = {
+            'signal': first_signal.get('signal', ''),
+            'description': first_signal.get('description', ''),
+            'source_url': first_signal.get('source_url', ''),
+            'source_name': first_signal.get('source_name', '')
+        }
 
-    # 3. Copy network_intelligence into find_lead.network
+    # 3. Copy network_intelligence for fallback paths (already has correct snake_case keys)
     if enrich_lead.get('network_intelligence'):
-        if 'network' not in find_lead:
-            find_lead['network'] = {}
-        network = enrich_lead['network_intelligence']
-        # Map V2 field names to V1 field names
-        if network.get('warmPathsIn'):
-            find_lead['network']['warm_paths'] = network['warmPathsIn']
-        if network.get('partnerships'):
-            find_lead['network']['partnerships'] = network['partnerships']
-        if network.get('associations'):
-            find_lead['network']['associations'] = network['associations']
-        if network.get('awards'):
-            find_lead['network']['awards'] = network['awards']
-        if network.get('conferences'):
-            find_lead['network']['conferences'] = network['conferences']
-        # Also keep full object for V2
-        find_lead['network_intelligence'] = network
+        # Also populate resolved_entity for deeper fallback chain
+        if 'resolved_entity' not in find_lead:
+            find_lead['resolved_entity'] = {}
+        if 'company_intel' not in find_lead['resolved_entity']:
+            find_lead['resolved_entity']['company_intel'] = {}
+        find_lead['resolved_entity']['company_intel']['network_intelligence'] = enrich_lead['network_intelligence']
 
     # 4. Copy corporate_structure
     if enrich_lead.get('corporate_structure'):
         find_lead['corporate_structure'] = enrich_lead['corporate_structure']
 
-    # 5. Copy the_math, deal_strategy, competitive_positioning from insight
-    if insight_data.get('the_math'):
-        find_lead['the_math'] = insight_data['the_math']
-    if insight_data.get('deal_strategy'):
-        find_lead['deal_strategy'] = insight_data['deal_strategy']
-    if insight_data.get('competitive_positioning'):
-        find_lead['competitive_positioning'] = insight_data['competitive_positioning']
-    if insight_data.get('decision_strategy'):
-        find_lead['decision_strategy'] = insight_data['decision_strategy']
-    if insight_data.get('common_objections'):
-        find_lead['common_objections'] = insight_data['common_objections']
-    if insight_data.get('quick_reference'):
-        find_lead['quick_reference'] = insight_data['quick_reference']
-    if insight_data.get('sources'):
-        find_lead['sources'] = insight_data['sources']
-
-    # 6. Copy contacts list into find_lead.contacts (for frontend)
+    # 5. Copy contacts list into find_lead.contacts (for frontend fallback)
     if contacts_list:
         find_lead['contacts'] = contacts_list
 
-    print(f"  [DEBUG] V1-compat merge: company_intel={bool(find_lead.get('company_intel'))}, why_now={bool(find_lead.get('why_now'))}, contacts={len(contacts_list)}")
+    print(f"  [DEBUG] V1-compat merge: company_deep_dive={bool(enrich_lead.get('company_deep_dive'))}, additional_signals={len(enrich_lead.get('additional_signals', []))}, contacts={len(contacts_list)}")
 
     dossier_data = {
         'id': production_dossier_id,
