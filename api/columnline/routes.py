@@ -3133,7 +3133,18 @@ async def _publish_to_production_impl(run_id: str, request: PublishRequest = Non
             'companyIntel': composer_output.get('companyIntel'),
             'opportunityIntelligence': composer_output.get('opportunityIntelligence'),
             'corporateStructure': composer_output.get('corporateStructure'),
-            'networkIntelligence': composer_output.get('networkIntelligence'),
+            # Merge networkIntelligence: composer provides base, client-specific adds warmPathsIn
+            'networkIntelligence': (lambda ni, cs_wp: {
+                'warmPathsIn': ni.get('warmPathsIn', []) + cs_wp,
+                'associations': ni.get('associations', []),
+                'partnerships': ni.get('partnerships', []),
+                'conferences': ni.get('conferences', []),
+                'awards': ni.get('awards', []),
+                'upcomingOpportunities': ni.get('upcomingOpportunities', []),
+            })(
+                composer_output.get('networkIntelligence') or {},
+                client_specific_output.get('warmPathsIn', []) if client_specific_output else []
+            ),
             'competitivePositioning': composer_output.get('competitivePositioning'),
             'dealStrategy': composer_output.get('dealStrategy'),
             'decisionStrategy': composer_output.get('decisionStrategy'),
